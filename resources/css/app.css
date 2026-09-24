@@ -1,0 +1,312 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/*
+  Stops the browser's own native pull-to-refresh (Chrome/Android's
+  swipe-down-to-reload gesture) from firing at the same time as the
+  in-app pull-to-refresh (see PullToRefresh component), which otherwise
+  shows two conflicting refresh indicators at once on mobile.
+*/
+html,
+body {
+    overscroll-behavior-y: contain;
+}
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+@source '../**/*.blade.php';
+@source '../**/*.js';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  Color system — pure neutral (0 chroma) black/white/gray only.
+  Primary = near-black in light mode, near-white in dark mode,
+  so the "primary action" is always the highest-contrast color on screen.
+*/
+:root {
+    --radius: 0.5rem;
+
+    /* Plain hex, not oklch() -- these are all zero-chroma grays, so
+       oklch buys nothing perceptually here, and hex sidesteps any
+       browser/webview that fails to parse oklch() (which silently
+       drops the whole declaration). Values are the exact
+       oklch(L 0 H) -> sRGB conversion, so this is a no-op visually. */
+    --background: #ffffff;
+    --foreground: #0a0a0a;
+
+    --card: #ffffff;
+    --card-foreground: #0a0a0a;
+
+    --popover: #ffffff;
+    --popover-foreground: #0a0a0a;
+
+    --primary: #0a0a0a;
+    --primary-foreground: #fafafa;
+
+    --secondary: #f5f5f5;
+    --secondary-foreground: #171717;
+
+    --muted: #f5f5f5;
+    --muted-foreground: #737373;
+
+    --accent: #f5f5f5;
+    --accent-foreground: #171717;
+
+    --destructive: #e7000b;
+    --destructive-foreground: #fafafa;
+
+    --border: #e5e5e5;
+    --input: #e5e5e5;
+    --ring: #a1a1a1;
+}
+
+.dark {
+    --background: #0a0a0a;
+    --foreground: #fafafa;
+
+    --card: #171717;
+    --card-foreground: #fafafa;
+
+    --popover: #171717;
+    --popover-foreground: #fafafa;
+
+    --primary: #fafafa;
+    --primary-foreground: #171717;
+
+    --secondary: #262626;
+    --secondary-foreground: #fafafa;
+
+    --muted: #262626;
+    --muted-foreground: #a1a1a1;
+
+    --accent: #262626;
+    --accent-foreground: #fafafa;
+
+    --destructive: #ff6467;
+    --destructive-foreground: #fafafa;
+
+    --border: rgba(255, 255, 255, 0.1);
+    --input: rgba(255, 255, 255, 0.15);
+    --ring: #737373;
+}
+
+@theme inline {
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+
+    --radius-sm: calc(var(--radius) - 4px);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+}
+
+@theme {
+    --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+
+    /*
+      Typography scale — the ONLY font sizes used across the app.
+      Every page reaches for one of these (via the <Heading>/<Text>
+      components in presentation/components/typography.tsx) instead of
+      picking arbitrary Tailwind text-* sizes, so hierarchy stays
+      consistent from the login screen to the reports.
+    */
+    --text-display: 2.75rem;
+    --text-display--line-height: 1.15;
+
+    --text-h1: 1.875rem;
+    --text-h1--line-height: 1.25;
+
+    --text-h2: 1.5rem;
+    --text-h2--line-height: 1.3;
+
+    --text-h3: 1.125rem;
+    --text-h3--line-height: 1.4;
+
+    --text-body: 0.9375rem;
+    --text-body--line-height: 1.6;
+
+    --text-small: 0.8125rem;
+    --text-small--line-height: 1.5;
+
+    --text-caption: 0.75rem;
+    --text-caption--line-height: 1.4;
+}
+
+@layer base {
+    * {
+        @apply border-border outline-ring/50;
+    }
+    body {
+        @apply bg-background text-foreground text-body;
+        font-feature-settings:
+            'cv02',
+            'cv03',
+            'cv04',
+            'cv11';
+    }
+}
+
+/*
+  Premium "shining" logo sweep — used for the trust badges on the login
+  footer ("Developed by") and the account screen ("Powered by"), styled
+  after the holographic shine on e-gov digital ID cards. A soft diagonal
+  highlight sweeps across each logo on a slow, staggered loop; the base
+  logo is always fully visible, this is a highlight layered on top.
+*/
+@keyframes shimmer-sweep {
+    0% {
+        transform: translateX(-120%) skewX(-20deg);
+    }
+    90%,
+    100% {
+        transform: translateX(220%) skewX(-20deg);
+    }
+}
+
+.shimmer-logo {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+}
+
+.shimmer-logo::after {
+    content: '';
+    position: absolute;
+    inset: -20% -60%;
+    background: linear-gradient(
+        75deg,
+        transparent 35%,
+        rgba(255, 255, 255, 0.6) 50%,
+        transparent 65%
+    );
+    animation: shimmer-sweep 6s linear infinite backwards;
+    animation-delay: var(--shimmer-delay, 0s);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.dark .shimmer-logo::after {
+    background: linear-gradient(
+        75deg,
+        transparent 35%,
+        rgba(255, 255, 255, 0.28) 50%,
+        transparent 65%
+    );
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .shimmer-logo::after {
+        animation: none;
+        display: none;
+    }
+}
+
+/* Dedicated shimmer for a single small badge (e.g. the CSG logo on the ID
+   card QR). Unlike `.shimmer-logo`'s single fast sweep-then-pause, this
+   loops back and forth (alternate) with an ease-in-out timing curve so the
+   shine never fully stops moving — a slow, continuous "wave" rather than a
+   periodic flash. */
+@keyframes shimmer-wave {
+    0% {
+        transform: translateX(-120%) skewX(-20deg);
+    }
+    100% {
+        transform: translateX(120%) skewX(-20deg);
+    }
+}
+
+.shimmer-badge {
+    overflow: hidden;
+    isolation: isolate;
+}
+
+.shimmer-badge::after {
+    content: '';
+    position: absolute;
+    inset: -30% -60%;
+    background: linear-gradient(
+        75deg,
+        transparent 35%,
+        rgba(255, 255, 255, 0.75) 50%,
+        transparent 65%
+    );
+    animation: shimmer-wave 3.2s ease-in-out infinite alternate;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.dark .shimmer-badge::after {
+    background: linear-gradient(
+        75deg,
+        transparent 35%,
+        rgba(255, 255, 255, 0.35) 50%,
+        transparent 65%
+    );
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .shimmer-badge::after {
+        animation: none;
+        display: none;
+    }
+}
+
+/*
+ * Two optional edits to resources/css/app.css. Neither is required — the
+ * redesign works without them — but both nudge the whole app toward the
+ * softness of the streak card.
+ *
+ * 1. Radius. The card primitive is rounded-xl, which at --radius: 0.5rem
+ *    resolves to a fairly tight 8px corner. The tiles are 16px. Bumping the
+ *    base to 0.75rem lands cards at 12px, so card → tile reads as one
+ *    family of curves instead of two.
+ *
+ *    In :root, change:
+ *        --radius: 0.5rem;
+ *    to:
+ *        --radius: 0.75rem;
+ *
+ * 2. Glow in dark mode. Colored shadows against a #0a0a0a background go
+ *    nearly invisible — the shadow is darker than the thing casting it. The
+ *    tone tokens already drop dark-mode glows to /20, but if you want them
+ *    to actually read as light rather than shadow, add this and the glow
+ *    becomes a soft halo instead.
+ */
+
+@layer utilities {
+    /* Apply alongside a `shadow-<color>-500/30` tile when you want the glow
+       to survive dark mode. Paint it behind the element, not under it. */
+    .dark .tile-halo {
+        box-shadow:
+            0 8px 20px -6px color-mix(in oklab, currentColor 45%, transparent),
+            0 0 0 1px color-mix(in oklab, currentColor 20%, transparent);
+    }
+}
+
+/* Reduced motion: the hero's blurred glow pool animates in on mount. Users
+   who've asked for less movement get it pre-placed instead. */
+@media (prefers-reduced-motion: reduce) {
+    [data-glow] {
+        transition: none !important;
+        animation: none !important;
+    }
+}
