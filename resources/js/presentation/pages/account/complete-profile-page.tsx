@@ -90,7 +90,7 @@ export function CompleteProfilePage() {
                 },
                 onError: (error) => {
                     // Surface the backend's actual reason where it has one
-                    // (e.g. blocked while an eligible session is ongoing)
+                    // (e.g. a rejected file)
                     // instead of a generic message for every case.
                     const message =
                         isAxiosError(error) && typeof error.response?.data?.message === 'string'

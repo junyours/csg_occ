@@ -1,7 +1,6 @@
 <?php
 
 use App\Application\Actions\Students\UpdateStudentPhoto;
-use App\Domain\Exceptions\PhotoUploadLockedException;
 use App\Models\AttendanceSession;
 use App\Models\Department;
 use App\Models\EventDay;
@@ -74,16 +73,18 @@ it('deletes the previous photo on re-upload', function () {
     expect($second->photo_path)->not->toBe($oldPath);
 });
 
-it('blocks upload while an eligible session is ongoing', function () {
+it('allows upload while an eligible session is ongoing', function () {
     Storage::fake('public');
     $student = photoTestStudent('2020300003');
     photoTestOngoingSession();
 
-    (new UpdateStudentPhoto(app(\Intervention\Image\ImageManager::class)))(
+    $updated = (new UpdateStudentPhoto(app(\Intervention\Image\ImageManager::class)))(
         $student,
         UploadedFile::fake()->image('photo.jpg'),
     );
-})->throws(PhotoUploadLockedException::class);
+
+    expect($updated->photo_path)->not->toBeNull();
+});
 
 it('allows upload when the only ongoing session excludes this student', function () {
     Storage::fake('public');

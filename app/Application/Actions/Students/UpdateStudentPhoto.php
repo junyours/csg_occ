@@ -2,10 +2,6 @@
 
 namespace App\Application\Actions\Students;
 
-use App\Domain\Enums\SessionStatus;
-use App\Domain\Exceptions\PhotoUploadLockedException;
-use App\Models\AttendanceSession;
-use App\Models\Exclusion;
 use App\Models\Student;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -34,10 +30,7 @@ final class UpdateStudentPhoto
 
     /**
      * Spec §4.5: re-upload replaces — never accumulates — a student's
-     * photo, and is blocked (423, via PhotoUploadLockedException) while
-     * any session this student is eligible for is currently ongoing, so
-     * no one can swap their photo mid-event to dodge an officer's visual
-     * identity check.
+     * photo. Allowed at any time, including while a session is ongoing.
      *
      * Ordering is deliberate: the new file is written to disk *before*
      * the DB transaction opens, so if the DB update fails the
@@ -51,10 +44,6 @@ final class UpdateStudentPhoto
      */
     public function __invoke(Student $student, UploadedFile $file): Student
     {
-        if ($this->hasEligibleOngoingSession($student)) {
-            throw new PhotoUploadLockedException;
-        }
-
         $oldPath = $student->photo_path;
         $newPath = $this->storeCompressed($file, $student);
 
@@ -98,28 +87,5 @@ final class UpdateStudentPhoto
         Storage::disk(self::DISK)->put($path, (string) $encoded);
 
         return $path;
-    }
-
-    /**
-     * Spec §4.5: locked while any session this student is *eligible* for
-     * (i.e. would actually be checked for attendance in) is ongoing.
-     * Mirrors EndSession's own attendee filter — only role=student
-     * accounts are ever tracked for attendance (spec §2: admins/officers
-     * are staff, not attendees) — and reuses the same per-session
-     * exclusion check used everywhere else attendance eligibility is
-     * decided, so "eligible" means the same thing here as it does when a
-     * session actually ends.
-     */
-    private function hasEligibleOngoingSession(Student $student): bool
-    {
-        return AttendanceSession::where('status', SessionStatus::Ongoing)
-            ->with('eventDay')
-            ->get()
-            ->contains(fn (AttendanceSession $session) => $student->isAttendanceEligibleForEvent($session->eventDay->event_id)
-                && ! in_array(
-                    $student->id,
-                    Exclusion::excludedStudentIdsForSession($session),
-                    true,
-                ));
     }
 }

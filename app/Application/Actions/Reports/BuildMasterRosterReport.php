@@ -91,6 +91,16 @@ final class BuildMasterRosterReport
             fn (Collection $forStudent) => (float) $forStudent->where('is_reversed', false)->sum('amount')
         );
 
+        // Per-session view of the same live (non-reversed) penalties, so
+        // the Excel export can print the amount inside the Late/Missed
+        // cell itself: student_id => [session_id => amount].
+        $penaltyAmountsBySession = $penalties->map(
+            fn (Collection $forStudent) => $forStudent->where('is_reversed', false)
+                ->groupBy('session_id')
+                ->map(fn (Collection $rows) => (float) $rows->sum('amount'))
+                ->all()
+        );
+
         // See BuildEventRosterReport for why this exists — sessions whose
         // Late/Missed penalty was later reversed should read "Reversed"
         // on the roster, not "Missed"/"Late".
@@ -121,9 +131,9 @@ final class BuildMasterRosterReport
                 $s->year_level ?? '—',
                 $s->section ?? '—',
             ))
-            ->map(function (Collection $students, string $key) use ($sessionMeta, $recordsBySession, $excludedBySession, $penaltyTotals, $reversedSessionIdsByStudent, $onGroupBuilt) {
+            ->map(function (Collection $students, string $key) use ($sessionMeta, $recordsBySession, $excludedBySession, $penaltyTotals, $reversedSessionIdsByStudent, $penaltyAmountsBySession, $onGroupBuilt) {
                 $group = $this->buildGroup(
-                    $key, $students, $sessionMeta, $recordsBySession, $excludedBySession, $penaltyTotals, $reversedSessionIdsByStudent,
+                    $key, $students, $sessionMeta, $recordsBySession, $excludedBySession, $penaltyTotals, $reversedSessionIdsByStudent, $penaltyAmountsBySession,
                 );
 
                 if ($onGroupBuilt !== null) {
@@ -243,6 +253,7 @@ final class BuildMasterRosterReport
         Collection $excludedBySession,
         Collection $penaltyTotals,
         Collection $reversedSessionIdsByStudent,
+        Collection $penaltyAmountsBySession,
     ): array {
         [$deptCode, $major, $yearLevel, $section] = explode('|', $key);
 
@@ -258,6 +269,7 @@ final class BuildMasterRosterReport
                     $reversedSessionIdsByStudent->get($student->id, collect()),
                 ),
                 'auto_sessions' => $this->autoSessionIdsFor($student, $sessionMeta, $recordsBySession),
+                'session_amounts' => $penaltyAmountsBySession->get($student->id, []),
                 'penalty_total' => $penaltyTotals->get($student->id, 0.0),
             ])
             ->values()

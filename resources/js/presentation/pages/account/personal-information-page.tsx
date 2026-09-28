@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react';
-import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 
 import { Camera, GraduationCap, Hash, IdCard, KeyRound, UserRound } from 'lucide-react';
@@ -104,10 +103,6 @@ export function PersonalInformationPage() {
                     setPendingFile(null);
                 },
                 onError: (error) => {
-                    if (isAxiosError(error) && error.response?.status === 423) {
-                        toast.error('Photo can’t be changed while an attendance session you’re eligible for is ongoing.');
-                        return;
-                    }
                     toast.error('Could not update your photo. Please try again.');
                 },
             },

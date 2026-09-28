@@ -142,6 +142,7 @@ final class EventRosterGroupSheet implements FromArray, ShouldAutoSize, WithEven
                 $row[] = $this->formatCell(
                     $student['sessions'][$session['id']] ?? null,
                     in_array($session['id'], $student['auto_sessions'] ?? [], true),
+                    (float) ($student['session_amounts'][$session['id']] ?? 0),
                 );
             }
 
@@ -159,7 +160,7 @@ final class EventRosterGroupSheet implements FromArray, ShouldAutoSize, WithEven
         return $rows;
     }
 
-    private function formatCell(?string $status, bool $auto = false): string
+    private function formatCell(?string $status, bool $auto = false, float $amount = 0.0): string
     {
         if (! $status) {
             return 'Pending';
@@ -168,7 +169,16 @@ final class EventRosterGroupSheet implements FromArray, ShouldAutoSize, WithEven
         // Staff whose Present was written automatically at session end
         // (no scan) read "Present (Auto — staff)"; the cell colour still
         // comes from the raw status, so it stays green.
-        return ucfirst($status).($auto && $status === 'present' ? ' (Auto — staff)' : '');
+        //
+        // Late/Missed cells also carry the amount charged for that
+        // session — "Late (25.00)" — so the row's Penalty Total can be
+        // traced cell by cell. Present/Excluded/Reversed never show one
+        // (nothing is owed), and a Late with no penalty stays plain.
+        $amountLabel = in_array($status, ['late', 'missed'], true) && $amount > 0
+            ? ' ('.number_format($amount, 2).')'
+            : '';
+
+        return ucfirst($status).$amountLabel.($auto && $status === 'present' ? ' (Auto — staff)' : '');
     }
 
     /**

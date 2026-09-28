@@ -94,7 +94,7 @@ it('rejects an oversized or non-image file', function () {
         ->assertJsonValidationErrors('photo');
 });
 
-it('returns 423 when an eligible session is ongoing', function () {
+it('lets a student change their photo while an eligible session is ongoing', function () {
     Storage::fake('public');
     $student = photoCtrlStudent('2020300001');
     $creator = photoCtrlStudent('2020000099', 'csg_admin');
@@ -113,5 +113,5 @@ it('returns 423 when an eligible session is ongoing', function () {
         ->post("/api/students/{$student->id}/photo", [
             'photo' => UploadedFile::fake()->image('me.jpg'),
         ])
-        ->assertStatus(423);
+        ->assertStatus(200);
 });
