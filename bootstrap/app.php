@@ -40,6 +40,7 @@ return Application::configure(basePath: dirname(__DIR__))
         }
 
         $middleware->alias([
+            'account.active' => \App\Http\Middleware\EnsureAccountIsActive::class,
             'password.changed' => \App\Http\Middleware\EnsurePasswordHasBeenChanged::class,
             'photo.uploaded' => \App\Http\Middleware\EnsurePhotoHasBeenUploaded::class,
         ]);

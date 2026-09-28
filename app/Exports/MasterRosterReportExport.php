@@ -30,6 +30,7 @@ final class MasterRosterReportExport implements WithMultipleSheets
                 $this->report['sessions'],
                 $this->report['events'],
                 $this->onSheetWritten,
+                $this->report['semesters'] ?? [],
             )];
         }
 
@@ -39,6 +40,7 @@ final class MasterRosterReportExport implements WithMultipleSheets
                 $this->report['sessions'],
                 $this->report['events'],
                 $this->onSheetWritten,
+                $this->report['semesters'] ?? [],
             ),
             $this->report['groups'],
         );

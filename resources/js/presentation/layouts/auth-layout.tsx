@@ -29,7 +29,7 @@ export function AuthLayout({ title, description, children }: AuthLayoutProps) {
             */}
             <span
                 aria-hidden
-                className="pointer-events-none absolute -top-24 left-1/2 size-[28rem] -translate-x-1/2 rounded-full bg-violet-500 opacity-[0.07] blur-3xl dark:opacity-[0.12]"
+                className="pointer-events-none absolute -top-24 left-1/2 size-112 -translate-x-1/2 rounded-full bg-violet-500 opacity-[0.07] blur-3xl dark:opacity-[0.12]"
             />
 
             <div className="relative w-full max-w-sm">

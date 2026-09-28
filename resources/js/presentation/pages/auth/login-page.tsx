@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 
@@ -110,6 +110,13 @@ export function LoginPage() {
                     // reflect it instead of toasting something misleading.
                     if (isAxiosError(error) && error.response?.status === 429) {
                         recordLoginRateLimit(username, error);
+                        return;
+                    }
+
+                    // AccountInactiveException (403): correct credentials, but the
+                    // account was deactivated at semester rollover.
+                    if (isAxiosError(error) && error.response?.status === 403 && typeof error.response.data?.message === 'string') {
+                        toast.error(error.response.data.message);
                         return;
                     }
 
@@ -263,6 +270,17 @@ export function LoginPage() {
                         onChange={(event) => setPassword(event.target.value)}
                         required
                     />
+                    <div className="flex justify-end">
+                        {/* Hands over whatever Student ID has been typed so
+                            far, so it's already filled in on the next screen. */}
+                        <Link
+                            to="/forgot-password"
+                            state={{ studentNumber }}
+                            className="text-small text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                        >
+                            Forgot password?
+                        </Link>
+                    </div>
                 </div>
                 {/* Same move as PasswordStepView: the lockout is a notice in
                     its own right, not a label crammed onto the button. */}

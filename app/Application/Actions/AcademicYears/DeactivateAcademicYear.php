@@ -2,7 +2,9 @@
 
 namespace App\Application\Actions\AcademicYears;
 
+use App\Domain\Exceptions\SemesterStillActiveException;
 use App\Models\AcademicYear;
+use App\Models\Semester;
 
 final class DeactivateAcademicYear
 {
@@ -15,6 +17,10 @@ final class DeactivateAcademicYear
      */
     public function __invoke(AcademicYear $academicYear): AcademicYear
     {
+        if (Semester::active()->exists()) {
+            throw new SemesterStillActiveException;
+        }
+
         $academicYear->update(['is_active' => false]);
 
         return $academicYear->fresh();

@@ -93,7 +93,7 @@ interface SegmentedRingProps {
 
 /**
  * A multi-segment donut — used for "distribution" reads (e.g. Present /
- * Late / Absent share of everything tracked) rather than a single score.
+ * Late / Missed share of everything tracked) rather than a single score.
  * Each segment is drawn as its own circle sharing the ring, offset to
  * start exactly where the previous one ended.
  */

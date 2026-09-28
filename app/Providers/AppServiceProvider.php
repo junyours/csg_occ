@@ -35,6 +35,25 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(5)->by($request->ip().'|'.(string) $request->input('username'));
         });
 
+        // Forgot-password flow. Same idea as 'login' — keyed on IP + the
+        // Student ID being targeted — plus a looser per-IP ceiling so one
+        // machine can't sweep through many Student IDs. This is only the
+        // HTTP layer: the real brute-force guard is the 5-wrong-guesses
+        // limit on the code itself (VerifyPasswordResetCode), which holds no
+        // matter how many IPs the guesses come from.
+        $passwordResetLimiter = function (Request $request) {
+            $studentNumber = $request->input('student_number');
+            $studentNumber = is_string($studentNumber) ? $studentNumber : '';
+
+            return [
+                Limit::perMinute(5)->by($request->ip().'|'.$studentNumber),
+                Limit::perMinute(20)->by((string) $request->ip()),
+            ];
+        };
+
+        RateLimiter::for('password-reset-request', $passwordResetLimiter);
+        RateLimiter::for('password-reset-attempt', $passwordResetLimiter);
+
         RateLimiter::for('api', function (Request $request) {
             return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
         });

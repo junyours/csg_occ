@@ -62,7 +62,7 @@ function reversePenaltyApiPenalty(Student $creator, Student $target): Attendance
         'student_id' => $target->id,
         'session_id' => $session->id,
         'amount' => 25,
-        'reason' => 'Absent - Time In',
+        'reason' => 'Missed - Time In',
     ]);
 }
 

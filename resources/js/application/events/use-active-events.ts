@@ -19,7 +19,7 @@ import { httpEventsRepository } from '@/infrastructure/events/events.repository.
 export function useActiveEvents() {
     const { data: events, isLoading } = useQuery({
         queryKey: EVENTS_QUERY_KEY,
-        queryFn: httpEventsRepository.list,
+        queryFn: () => httpEventsRepository.list(),
     });
 
     const activeEvents = (events ?? []).filter((event) => event.status === EventStatus.Ongoing);

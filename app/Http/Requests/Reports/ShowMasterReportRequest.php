@@ -19,6 +19,8 @@ class ShowMasterReportRequest extends FormRequest
 
     public function rules(): array
     {
-        return [];
+        return [
+            'semester_id' => ['nullable', 'integer', 'exists:semesters,id'],
+        ];
     }
 }

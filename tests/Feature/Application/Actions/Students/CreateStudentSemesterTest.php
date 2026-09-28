@@ -23,18 +23,16 @@ function studentSemesterTestSetup(): array
     return [$department, $admin];
 }
 
-it('leaves semester_id null when no academic year or semester has been set up yet', function () {
+it('refuses to create a student when no academic year or semester has been set up yet', function () {
     [$department] = studentSemesterTestSetup();
 
-    $student = (new CreateStudent)([
+    (new CreateStudent)([
         'student_number' => '2023105413',
         'last_name' => 'Cruz', 'first_name' => 'Juan',
         'department_id' => $department->id,
         'year_level' => '3',
     ]);
-
-    expect($student->semester_id)->toBeNull();
-});
+})->throws(\App\Domain\Exceptions\NoActiveSemesterException::class);
 
 it('defaults a new student onto the active semester of the active academic year', function () {
     [$department, $admin] = studentSemesterTestSetup();
@@ -59,7 +57,7 @@ it('defaults a new student onto the active semester of the active academic year'
         ->and($student->semester->academicYear->id)->toBe($academicYear->id);
 });
 
-it('ignores an active semester belonging to a non-active academic year', function () {
+it('refuses when the only active semester belongs to a non-active academic year', function () {
     [$department, $admin] = studentSemesterTestSetup();
     $inactiveYear = AcademicYear::create(['name' => '2025-2026', 'is_active' => false, 'created_by' => $admin->id]);
     Semester::create([
@@ -67,20 +65,18 @@ it('ignores an active semester belonging to a non-active academic year', functio
         'is_active' => true, 'created_by' => $admin->id,
     ]);
 
-    $student = (new CreateStudent)([
+    (new CreateStudent)([
         'student_number' => '2023105413',
         'last_name' => 'Cruz', 'first_name' => 'Juan',
         'department_id' => $department->id,
         'year_level' => '3',
     ]);
+})->throws(\App\Domain\Exceptions\NoActiveSemesterException::class);
 
-    expect($student->semester_id)->toBeNull();
-});
-
-it('respects an explicitly given semester_id over the active default', function () {
+it('ignores a semester_id override and always enrolls into the active semester', function () {
     [$department, $admin] = studentSemesterTestSetup();
     $academicYear = AcademicYear::create(['name' => '2026-2027', 'is_active' => true, 'created_by' => $admin->id]);
-    Semester::create([
+    $active = Semester::create([
         'academic_year_id' => $academicYear->id, 'name' => 'semester_1',
         'is_active' => true, 'created_by' => $admin->id,
     ]);
@@ -97,5 +93,5 @@ it('respects an explicitly given semester_id over the active default', function 
         'semester_id' => $chosen->id,
     ]);
 
-    expect($student->semester_id)->toBe($chosen->id);
+    expect($student->semester_id)->toBe($active->id);
 });

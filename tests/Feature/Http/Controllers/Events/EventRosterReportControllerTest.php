@@ -53,7 +53,7 @@ function rosterApiSession(EventModel $event): AttendanceSession
 }
 
 it('rejects an unauthenticated roster report request', function () {
-    $admin = rosterApiStaff('csg_admin', '2020000001');
+    $admin = rosterApiStaff('system_admin', '2020000001');
     $event = rosterApiEvent($admin->id);
 
     $this->getJson("/api/events/{$event->id}/roster-report")->assertStatus(401);
@@ -71,7 +71,7 @@ it('rejects an officer requesting the roster report', function () {
 it('lets a csg admin download the roster report as an xlsx workbook by default', function () {
     Excel::fake();
 
-    $admin = rosterApiStaff('csg_admin', '2020000002');
+    $admin = rosterApiStaff('system_admin', '2020000002');
     $event = rosterApiEvent($admin->id);
     rosterApiSession($event);
     $bsit = rosterApiDept('BSIT');
@@ -93,7 +93,7 @@ it('lets a csg admin download the roster report as an xlsx workbook by default',
 });
 
 it('lets a csg admin download the roster report as a pdf', function () {
-    $admin = rosterApiStaff('csg_admin', '2020000003');
+    $admin = rosterApiStaff('system_admin', '2020000003');
     $event = rosterApiEvent($admin->id);
     rosterApiSession($event);
 

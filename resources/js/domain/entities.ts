@@ -1,4 +1,4 @@
-import type { AttendanceStatus, CheckType, EventStatus, ExclusionScope, ExclusionStatus, Role, SessionStatus, WindowType } from '@/domain/enums';
+import type { StudentStatus, AttendanceStatus, CheckType, EventStatus, ExclusionScope, ExclusionStatus, Role, SessionStatus, WindowType } from '@/domain/enums';
 
 export interface Department {
     id: number;
@@ -58,6 +58,9 @@ export interface Student {
     scAdminDepartmentId: number | null;
     officerEventId: number | null;
     semesterId: number | null;
+    // Lifecycle: everyone but System Admin goes inactive when a semester is
+    // deactivated; import / "Add student" / the edit screen re-activate.
+    status: StudentStatus;
     photoPath: string | null;
     photoUrl: string | null;
     mustChangePassword: boolean;

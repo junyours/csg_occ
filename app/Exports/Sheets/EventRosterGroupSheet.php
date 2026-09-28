@@ -66,12 +66,12 @@ final class EventRosterGroupSheet implements FromArray, ShouldAutoSize, WithEven
     private const STATUS_COLORS = [
         'present' => ['D1FAE5', '065F46'],  // emerald-100 / emerald-800
         'late' => ['FEF3C7', '92400E'],     // amber-100 / amber-800
-        'absent' => ['FEE2E2', '991B1B'],   // red-100 / red-800
+        'missed' => ['FEE2E2', '991B1B'],   // red-100 / red-800
         'excluded' => ['F3F4F6', '374151'], // gray-100 / gray-700
         'pending' => ['F9FAFB', '6B7280'],  // gray-50 / gray-500
         // Indigo, matching .status-reversed in the roster PDF blade so the
         // same report reads the same in both formats. Deliberately not red:
-        // a reversed penalty is forgiven, and colouring it like Absent is
+        // a reversed penalty is forgiven, and colouring it like Missed is
         // exactly the confusion this status exists to remove.
         'reversed' => ['E0E7FF', '3730A3'], // indigo-100 / indigo-800
     ];
@@ -93,7 +93,14 @@ final class EventRosterGroupSheet implements FromArray, ShouldAutoSize, WithEven
 
     public function title(): string
     {
-        $title = trim(sprintf('%s%s %s%s', $this->group['department_code'], $this->group['major'] ? '-'.$this->group['major'] : '', $this->group['year_level'], $this->group['section']));
+        // The section already carries its year ("4C"), so the year level is
+        // only prefixed when the section doesn't start with it: "BSIT 4C",
+        // not "BSIT 44C".
+        $year = (string) $this->group['year_level'];
+        $section = (string) $this->group['section'];
+        $yearPart = $year !== '' && str_starts_with($section, $year) ? '' : $year;
+
+        $title = trim(sprintf('%s%s %s%s', $this->group['department_code'], $this->group['major'] ? '-'.$this->group['major'] : '', $yearPart, $section));
 
         // Excel sheet names are capped at 31 characters — long department
         // names/codes are the only realistic way to hit that here.
@@ -132,7 +139,10 @@ final class EventRosterGroupSheet implements FromArray, ShouldAutoSize, WithEven
             $row = [$student['student_number'], $student['last_name'], $student['first_name']];
 
             foreach ($this->sessions as $session) {
-                $row[] = $this->formatCell($student['sessions'][$session['id']] ?? null);
+                $row[] = $this->formatCell(
+                    $student['sessions'][$session['id']] ?? null,
+                    in_array($session['id'], $student['auto_sessions'] ?? [], true),
+                );
             }
 
             $row[] = number_format($student['penalty_total'], 2);
@@ -149,9 +159,16 @@ final class EventRosterGroupSheet implements FromArray, ShouldAutoSize, WithEven
         return $rows;
     }
 
-    private function formatCell(?string $status): string
+    private function formatCell(?string $status, bool $auto = false): string
     {
-        return $status ? ucfirst($status) : 'Pending';
+        if (! $status) {
+            return 'Pending';
+        }
+
+        // Staff whose Present was written automatically at session end
+        // (no scan) read "Present (Auto — staff)"; the cell colour still
+        // comes from the raw status, so it stays green.
+        return ucfirst($status).($auto && $status === 'present' ? ' (Auto — staff)' : '');
     }
 
     /**

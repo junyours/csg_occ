@@ -8,6 +8,9 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
+// Nobody can be previewed/imported without an active semester.
+beforeEach(fn () => seedActiveSemester());
+
 function previewDept(string $code): Department
 {
     return Department::firstOrCreate(['code' => $code], ['name' => $code]);
@@ -52,6 +55,9 @@ it('reports every row as valid without creating any student records', function (
         ->and($preview['total_rows'])->toBe(2)
         ->and($preview['valid'])->toBe(2)
         ->and($preview['invalid'])->toBe(0)
+        ->and($preview['created'])->toBe(2)
+        ->and($preview['updated'])->toBe(0)
+        ->and($preview['skipped'])->toBe(0)
         ->and($preview['files'][0]['department_code'])->toBe('BSIT')
         ->and($preview['files'][0]['section'])->toBe('1A')
         ->and($preview['files'][0]['rows'][0]['valid'])->toBeTrue()
@@ -63,6 +69,7 @@ it('reports every row as valid without creating any student records', function (
 
 it('flags the same problems the real import would, still without writing anything', function () {
     $actor = previewActor('csg_admin');
+    $before = Student::count();
 
     $file = previewFile('NOPE-1A.csv', [
         ['2023000001', 'Cruz', 'Juan', 'Dela', ''],
@@ -74,7 +81,7 @@ it('flags the same problems the real import would, still without writing anythin
         ->and($preview['files'][0]['valid'])->toBeFalse()
         ->and($preview['files'][0]['parse_error'])->toContain('Unknown department code: NOPE');
 
-    expect(Student::count())->toBe(1); // just the actor — nothing imported
+    expect(Student::count())->toBe($before);
 });
 
 it('produces a preview whose valid rows import cleanly afterwards', function () {

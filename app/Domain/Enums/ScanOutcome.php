@@ -12,7 +12,7 @@ namespace App\Domain\Enums;
  *   check-in, classified Present or Late against the session's window.
  * - Duplicate: the student already has a record for this session (they
  *   already scanned, or the session was ended and they were marked
- *   Absent/Excluded before this scan came in). No write happened; this is
+ *   Missed/Excluded before this scan came in). No write happened; this is
  *   the "same badge scanned twice" case the scanner UI should flag
  *   distinctly rather than showing a plain "Present" as if it were new.
  */

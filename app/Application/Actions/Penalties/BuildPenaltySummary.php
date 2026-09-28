@@ -2,6 +2,8 @@
 
 namespace App\Application\Actions\Penalties;
 
+use App\Domain\Support\CurrentSemester;
+use App\Domain\Support\SemesterScope;
 use App\Models\AttendancePenalty;
 
 final class BuildPenaltySummary
@@ -26,15 +28,20 @@ final class BuildPenaltySummary
      *     status?: 'all'|'active'|'reversed',
      *     search?: string,
      * } $filters
-     * @return array{total: float, absentCount: int, lateCount: int, count: int}
+     * @return array{total: float, absentCount: int, lateCount: int, count: int, bySemester?: list<array>}
+     *         `bySemester` is only present when scope=all.
      */
     public function __invoke(array $filters): array
     {
         $query = AttendancePenalty::query();
 
+        SemesterScope::penalties(
+            $query,
+            ($filters['scope'] ?? null) === 'all' ? null : ($filters['semester_id'] ?? CurrentSemester::id()),
+        );
+
         if (! empty($filters['department_id'])) {
-            $departmentId = $filters['department_id'];
-            $query->whereHas('student', fn ($q) => $q->where('department_id', $departmentId));
+            SemesterScope::penaltyDepartment($query, (int) $filters['department_id']);
         }
 
         if (! empty($filters['event_id'])) {
@@ -58,11 +65,56 @@ final class BuildPenaltySummary
         // Clone for every aggregate below rather than reusing $query
         // directly, so each call runs against the same filtered set
         // independent of what an earlier aggregate call did to it.
-        return [
+        $summary = [
             'total' => (float) (clone $query)->sum('amount'),
-            'absentCount' => (clone $query)->where('reason', 'like', 'Absent%')->count(),
+            'absentCount' => (clone $query)->where('reason', 'like', 'Missed%')->count(),
             'lateCount' => (clone $query)->where('reason', 'like', 'Late%')->count(),
             'count' => (clone $query)->count(),
         ];
+
+        // "All semesters" never merges into one number: each semester gets
+        // its own subtotal over the same filtered rows.
+        if (($filters['scope'] ?? null) === 'all') {
+            $summary['bySemester'] = $this->bySemester(clone $query);
+        }
+
+        return $summary;
+    }
+
+    /**
+     * @return list<array{semester_id: ?int, semester_name: ?string, academic_year_name: ?string, is_current: bool, total: float, absentCount: int, lateCount: int, count: int}>
+     */
+    private function bySemester($query): array
+    {
+        $rows = $query->toBase()
+            ->selectRaw(SemesterScope::PENALTY_SEMESTER.' as sem_id')
+            ->selectRaw('COALESCE(SUM(amount), 0) as total')
+            ->selectRaw('COUNT(*) as cnt')
+            ->selectRaw("SUM(CASE WHEN reason LIKE 'Missed%' THEN 1 ELSE 0 END) as absent")
+            ->selectRaw("SUM(CASE WHEN reason LIKE 'Late%' THEN 1 ELSE 0 END) as late")
+            ->groupBy('sem_id')
+            ->get();
+
+        $labels = SemesterScope::labels($rows->pluck('sem_id'));
+        $currentId = CurrentSemester::id();
+
+        return $rows
+            ->map(function ($row) use ($labels, $currentId) {
+                $id = $row->sem_id !== null ? (int) $row->sem_id : null;
+
+                return [
+                    'semester_id' => $id,
+                    'semester_name' => $id !== null ? ($labels[$id]['semester_name'] ?? null) : null,
+                    'academic_year_name' => $id !== null ? ($labels[$id]['academic_year_name'] ?? null) : null,
+                    'is_current' => $id !== null && $id === $currentId,
+                    'total' => (float) $row->total,
+                    'absentCount' => (int) $row->absent,
+                    'lateCount' => (int) $row->late,
+                    'count' => (int) $row->cnt,
+                ];
+            })
+            ->sortByDesc(fn (array $group) => $group['semester_id'] ?? 0)
+            ->values()
+            ->all();
     }
 }

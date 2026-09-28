@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Domain\Enums\Role;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -17,8 +18,15 @@ class Student extends Authenticatable
         'student_number', 'last_name', 'first_name', 'middle_name', 'suffix',
         'department_id', 'major', 'year_level', 'section', 'date_enrolled', 'role', 'sc_admin_department_id',
         'officer_event_id', 'semester_id', 'photo_path', 'qr_token', 'qr_version', 'username', 'password',
-        'must_change_password', 'has_accepted_terms',
+        'must_change_password', 'has_accepted_terms', 'status',
     ];
+
+    public const STATUS_ACTIVE = 'active';
+
+    public const STATUS_INACTIVE = 'inactive';
+
+    /** Attendance takes part for these roles; System Admin never does. */
+    public const ATTENDEE_ROLES = [Role::Student, Role::CsgAdmin, Role::ScAdmin, Role::Officer];
 
     protected $hidden = ['password', 'remember_token', 'qr_token'];
 
@@ -65,7 +73,7 @@ class Student extends Authenticatable
      *     Officer is scoped via officer_event_id.
      *  2. The student's own department must be one this event is scoped
      *     to (see EventModel::includesDepartment) — an event narrowed to
-     *     e.g. BSIT + BEd should never track (or later mark absent/
+     *     e.g. BSIT + BEd should never track (or later mark missed/
      *     penalize) a BSBA student just because they happen to scan.
      *
      * Callers that need a *different* error message for each gate (e.g.
@@ -83,6 +91,21 @@ class Student extends Authenticatable
         $event = EventModel::with('departments')->find($eventId);
 
         return $event !== null && $event->includesDepartment($this->department_id);
+    }
+
+    public function isInactive(): bool
+    {
+        return $this->status === self::STATUS_INACTIVE;
+    }
+
+    public function scopeAttendees(Builder $query): Builder
+    {
+        return $query->whereIn('role', array_map(fn (Role $role) => $role->value, self::ATTENDEE_ROLES));
+    }
+
+    public function scopeActiveAccounts(Builder $query): Builder
+    {
+        return $query->where('status', self::STATUS_ACTIVE);
     }
 
     public function department(): BelongsTo

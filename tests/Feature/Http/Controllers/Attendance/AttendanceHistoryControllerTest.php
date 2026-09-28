@@ -169,3 +169,18 @@ it('validates the status and sort filters', function () {
         ->getJson('/api/attendance-history?sort=bogus')
         ->assertStatus(422);
 });
+
+it('includes a per-semester summary only when listing all semesters', function () {
+    $admin = historyApiStaff('csg_admin', '2020000090');
+    historyApiRecord($admin, historyApiStudent('2023109001'));
+
+    $this->actingAs($admin, 'sanctum')
+        ->getJson('/api/attendance-history?scope=all')
+        ->assertStatus(200)
+        ->assertJsonStructure(['data', 'semester_summary']);
+
+    $this->actingAs($admin, 'sanctum')
+        ->getJson('/api/attendance-history')
+        ->assertStatus(200)
+        ->assertJsonMissingPath('semester_summary');
+});

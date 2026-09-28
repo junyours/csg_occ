@@ -3,10 +3,15 @@
 namespace App\Http\Controllers\Students;
 
 use App\Application\Actions\Students\CreateStudent;
+use App\Application\Actions\Students\ReenrollStudent;
+use App\Application\Actions\Students\UpdateStudent;
 use App\Domain\Enums\Role;
+use App\Domain\Exceptions\StudentAlreadyExistsException;
+use App\Domain\Exceptions\SystemAdminAccountException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Students\IndexStudentRequest;
 use App\Http\Requests\Students\StoreStudentRequest;
+use App\Http\Requests\Students\UpdateStudentRequest;
 use App\Models\Student;
 
 class StudentController extends Controller
@@ -48,6 +53,10 @@ class StudentController extends Controller
             $query->where('section', $filters['section']);
         }
 
+        if (! empty($filters['status']) && $filters['status'] !== 'all') {
+            $query->where('status', $filters['status']);
+        }
+
         if (! empty($filters['search'])) {
             $term = '%'.$filters['search'].'%';
             $query->where(function ($q) use ($term) {
@@ -67,10 +76,34 @@ class StudentController extends Controller
         );
     }
 
-    public function store(StoreStudentRequest $request, CreateStudent $createStudent)
+    /**
+     * Single add. An existing number is never duplicated: 409 (with the
+     * record, for update mode) unless `update_existing` is sent, which
+     * re-enrolls it like an import update row (200).
+     */
+    public function store(StoreStudentRequest $request, CreateStudent $createStudent, ReenrollStudent $reenrollStudent)
     {
-        $student = $createStudent($request->validated());
+        $data = $request->validated();
 
-        return response()->json($student->fresh('department'), 201);
+        $existing = Student::where('student_number', $data['student_number'])->first();
+
+        if ($existing) {
+            if ($existing->role === Role::SystemAdmin) {
+                throw new SystemAdminAccountException;
+            }
+
+            if (! $request->boolean('update_existing')) {
+                throw new StudentAlreadyExistsException($existing->load('department'));
+            }
+
+            return response()->json($reenrollStudent($existing, $data)->load('department'), 200);
+        }
+
+        return response()->json($createStudent($data)->fresh('department'), 201);
+    }
+
+    public function update(UpdateStudentRequest $request, Student $student, UpdateStudent $updateStudent)
+    {
+        return response()->json($updateStudent($student, $request->validated()));
     }
 }

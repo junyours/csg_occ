@@ -20,7 +20,7 @@
  *           so those chips went unreadable in dark mode).
  *
  * Hue keeps its existing meaning across the app — emerald is Present, amber
- * is Late, red is Absent/owed, orange is streak, violet is "you"/share, sky
+ * is Late, red is Missed/owed, orange is streak, violet is "you"/share, sky
  * is scheduling. Nothing here is decorative: if a color shows up, it's
  * carrying the same meaning it carries on the badges and the rings.
  */
@@ -140,5 +140,5 @@ export const TONE: Record<Tone, ToneStyle> = {
 
 /** Cycling tints for department avatars — a visual anchor so each card is
  *  findable at a glance, not a meaningful code. Skips the four status hues
- *  so a department badge is never mistaken for a Present/Late/Absent one. */
+ *  so a department badge is never mistaken for a Present/Late/Missed one. */
 export const DEPARTMENT_TONES: Tone[] = ['violet', 'sky', 'orange', 'emerald'];

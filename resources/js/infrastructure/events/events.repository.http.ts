@@ -65,7 +65,7 @@ interface RawEvent {
     semester_id: number | null;
     status: string;
     // Present when the controller eager-loads 'semester.academicYear'
-    // (index()) — absent from responses that don't need it.
+    // (index()) — missed from responses that don't need it.
     semester?: {
         id: number;
         name: string;
@@ -73,7 +73,7 @@ interface RawEvent {
     } | null;
     days?: RawDay[];
     // Present when the controller eager-loads 'departments' (index()) —
-    // absent departments means "not requested", NOT "no restriction";
+    // missed departments means "not requested", NOT "no restriction";
     // toEvent() below always normalizes to [] either way.
     departments?: Array<{ id: number; name: string; code: string }>;
 }
@@ -132,15 +132,17 @@ export interface MyAttendanceSession {
     /** The session's own lifecycle: scheduled / ongoing / ended. */
     sessionStatus: SessionStatus;
     /**
-     * This caller's outcome for the session — present/late/absent/excluded,
+     * This caller's outcome for the session — present/late/missed/excluded,
      * or null while it's still pending (not yet scanned, session not
-     * ended). Never guessed at Absent client-side; null just means "no
+     * ended). Never guessed at Missed client-side; null just means "no
      * verdict yet".
      */
     attendanceStatus: AttendanceStatus | null;
     scannedAt: string | null;
     /** Who scanned this record — null while it's still pending (no scan yet). */
     scannedByName: string | null;
+    /** Staff Present written automatically when the session ended (no scan). */
+    autoPresent: boolean;
 }
 
 export interface MyAttendanceDay {
@@ -168,6 +170,7 @@ interface RawMyAttendanceSession {
     attendance_status: string | null;
     scanned_at: string | null;
     scanned_by_name: string | null;
+    auto_present?: boolean;
 }
 
 interface RawMyAttendanceDay {
@@ -203,6 +206,7 @@ function toMyEventAttendance(raw: RawMyEventAttendance): MyEventAttendance {
                 attendanceStatus: session.attendance_status as AttendanceStatus | null,
                 scannedAt: session.scanned_at,
                 scannedByName: session.scanned_by_name,
+                autoPresent: session.auto_present ?? false,
             })),
         })),
     };
@@ -224,6 +228,7 @@ export interface MyAttendanceHistoryEntry {
     attendanceStatus: AttendanceStatus | null;
     scannedAt: string | null;
     scannedByName: string | null;
+    autoPresent: boolean;
 }
 
 interface RawMyAttendanceHistoryEntry {
@@ -242,6 +247,7 @@ interface RawMyAttendanceHistoryEntry {
     attendance_status: string | null;
     scanned_at: string | null;
     scanned_by_name: string | null;
+    auto_present?: boolean;
 }
 
 function toMyAttendanceHistoryEntry(raw: RawMyAttendanceHistoryEntry): MyAttendanceHistoryEntry {
@@ -261,6 +267,7 @@ function toMyAttendanceHistoryEntry(raw: RawMyAttendanceHistoryEntry): MyAttenda
         attendanceStatus: raw.attendance_status as AttendanceStatus | null,
         scannedAt: raw.scanned_at,
         scannedByName: raw.scanned_by_name,
+        autoPresent: raw.auto_present ?? false,
     };
 }
 
@@ -290,8 +297,14 @@ interface RawDeleteEventDayResult {
 }
 
 export const httpEventsRepository = {
-    async list(): Promise<EventWithDays[]> {
-        const { data } = await httpClient.get<RawEvent[]>('/events');
+    /**
+     * `semester`: omitted/null = current semester (server default, and the only
+     * option for students); a number = that semester; 'all' = every semester.
+     */
+    async list(semester?: number | 'all' | null): Promise<EventWithDays[]> {
+        const { data } = await httpClient.get<RawEvent[]>('/events', {
+            params: semester === 'all' ? { scope: 'all' } : semester ? { semester_id: semester } : undefined,
+        });
         return data.map(toEvent);
     },
 

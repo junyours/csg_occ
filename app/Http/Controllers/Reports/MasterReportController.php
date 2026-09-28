@@ -11,7 +11,7 @@ class MasterReportController extends Controller
 {
     /**
      * GET /reports/master — every event in the current active academic
-     * year + semester, each with its total Present/Absent/Late/Excluded,
+     * year + semester, each with its total Present/Missed/Late/Excluded,
      * for the "Reports" row on the Settings screen.
      */
     public function show(ShowMasterReportRequest $request, BuildMasterReport $buildMasterReport)
@@ -22,6 +22,8 @@ class MasterReportController extends Controller
         // EventRosterReportController and RosterReportGenerationController.
         $departmentId = $user->role === Role::ScAdmin ? $user->sc_admin_department_id : null;
 
-        return response()->json($buildMasterReport($departmentId));
+        $semesterId = $request->validated('semester_id');
+
+        return response()->json($buildMasterReport($departmentId, $semesterId !== null ? (int) $semesterId : null));
     }
 }

@@ -15,14 +15,14 @@ export interface DashboardActiveSession {
 export interface DashboardSessionCounts {
     present: number;
     late: number;
-    absent: number;
+    missed: number;
     excluded: number;
     pending: number;
     totalStudents: number;
 }
 
 /**
- * Present/Late/Absent summed across every event and session ever run —
+ * Present/Late/Missed summed across every event and session ever run —
  * never null, unlike activeSessionCounts below (which is tied to whatever
  * session happens to be ongoing right now, and disappears the moment
  * nothing is — between windows, or once an event has ended).
@@ -30,7 +30,7 @@ export interface DashboardSessionCounts {
 export interface DashboardOverallCounts {
     present: number;
     late: number;
-    absent: number;
+    missed: number;
 }
 
 /**
@@ -50,7 +50,7 @@ export interface DashboardEventPenalty {
 /**
  * One department's slice of overallAttendanceCounts — the attendance
  * counterpart to DashboardEventPenalty above. percentageOfOverall is this
- * department's tracked (present + late + absent) as a share of every
+ * department's tracked (present + late + missed) as a share of every
  * department's tracked total combined.
  */
 export interface DashboardDepartmentAttendance {
@@ -59,7 +59,7 @@ export interface DashboardDepartmentAttendance {
     departmentCode: string;
     present: number;
     late: number;
-    absent: number;
+    missed: number;
     tracked: number;
     percentageOfOverall: number;
 }
@@ -105,6 +105,20 @@ export interface AdminDashboardSummary {
     role: Role;
     scope: 'global' | 'department';
     department: { id: number; name: string; code: string } | null;
+    /** The semester the numbers cover; null when viewing "All semesters". */
+    semester: { id: number; name: string; isCurrent: boolean } | null;
+    allSemesters: boolean;
+    /** Only when allSemesters — each semester listed separately, never blended. */
+    bySemester: Array<{
+        semesterId: number;
+        semesterName: string;
+        academicYearName: string | null;
+        isCurrent: boolean;
+        present: number;
+        late: number;
+        missed: number;
+        penaltyTotal: number;
+    }>;
     totalStudents: number;
     eventsCount: number;
     activeSession: DashboardActiveSession | null;
@@ -133,7 +147,7 @@ export interface OfficerDashboardSummary {
 
 export interface StudentDashboardSummary {
     role: Role;
-    totals: { present: number; late: number; absent: number; excluded: number };
+    totals: { present: number; late: number; missed: number; excluded: number };
     penaltyTotal: number;
     activeSession: DashboardActiveSession | null;
     activeSessionStatus: AttendanceStatus | null;
@@ -163,7 +177,7 @@ interface RawActiveSession {
 interface RawSessionCounts {
     present: number;
     late: number;
-    absent: number;
+    missed: number;
     excluded: number;
     pending: number;
     total_students: number;
@@ -172,7 +186,7 @@ interface RawSessionCounts {
 interface RawOverallCounts {
     present: number;
     late: number;
-    absent: number;
+    missed: number;
 }
 
 interface RawEventPenalty {
@@ -188,7 +202,7 @@ interface RawDepartmentAttendance {
     department_code: string;
     present: number;
     late: number;
-    absent: number;
+    missed: number;
     tracked: number;
     percentage_of_overall: number;
 }
@@ -217,6 +231,18 @@ interface RawDashboardSummary {
     role: string;
     scope?: 'global' | 'department';
     department?: { id: number; name: string; code: string } | null;
+    semester?: { id: number; name: string; is_current: boolean } | null;
+    all_semesters?: boolean;
+    by_semester?: Array<{
+        semester_id: number;
+        semester_name: string;
+        academic_year_name: string | null;
+        is_current: boolean;
+        present: number;
+        late: number;
+        missed: number;
+        penalty_total: number;
+    }>;
     total_students?: number;
     events_count?: number;
     active_session: RawActiveSession | null;
@@ -229,7 +255,7 @@ interface RawDashboardSummary {
     my_scans?: number;
     total_scans?: number;
     contribution_percentage?: number;
-    totals?: { present: number; late: number; absent: number; excluded: number };
+    totals?: { present: number; late: number; missed: number; excluded: number };
     active_session_status?: string | null;
     streak?: { current: number; longest: number };
     streak_leaderboard?: RawStreakLeaderboardEntry[];
@@ -256,7 +282,7 @@ function toSessionCounts(raw: RawSessionCounts | null | undefined): DashboardSes
     return {
         present: raw.present,
         late: raw.late,
-        absent: raw.absent,
+        missed: raw.missed,
         excluded: raw.excluded,
         pending: raw.pending,
         totalStudents: raw.total_students,
@@ -295,7 +321,7 @@ function toDashboardSummary(raw: RawDashboardSummary): DashboardSummary {
     if (raw.role === 'student') {
         return {
             role: raw.role as Role,
-            totals: raw.totals ?? { present: 0, late: 0, absent: 0, excluded: 0 },
+            totals: raw.totals ?? { present: 0, late: 0, missed: 0, excluded: 0 },
             penaltyTotal: raw.penalty_total ?? 0,
             activeSession,
             activeSessionStatus: (raw.active_session_status as AttendanceStatus | null) ?? null,
@@ -309,18 +335,30 @@ function toDashboardSummary(raw: RawDashboardSummary): DashboardSummary {
         role: raw.role as Role,
         scope: raw.scope ?? 'global',
         department: raw.department ?? null,
+        semester: raw.semester ? { id: raw.semester.id, name: raw.semester.name, isCurrent: raw.semester.is_current } : null,
+        allSemesters: raw.all_semesters ?? false,
+        bySemester: (raw.by_semester ?? []).map((row) => ({
+            semesterId: row.semester_id,
+            semesterName: row.semester_name,
+            academicYearName: row.academic_year_name,
+            isCurrent: row.is_current,
+            present: row.present,
+            late: row.late,
+            missed: row.missed,
+            penaltyTotal: row.penalty_total,
+        })),
         totalStudents: raw.total_students ?? 0,
         eventsCount: raw.events_count ?? 0,
         activeSession,
         activeSessionCounts: toSessionCounts(raw.active_session_counts),
-        overallAttendanceCounts: raw.overall_attendance_counts ?? { present: 0, late: 0, absent: 0 },
+        overallAttendanceCounts: raw.overall_attendance_counts ?? { present: 0, late: 0, missed: 0 },
         attendanceByDepartment: (raw.attendance_by_department ?? []).map((row) => ({
             departmentId: row.department_id,
             departmentName: row.department_name,
             departmentCode: row.department_code,
             present: row.present,
             late: row.late,
-            absent: row.absent,
+            missed: row.missed,
             tracked: row.tracked,
             percentageOfOverall: row.percentage_of_overall,
         })),
@@ -343,8 +381,11 @@ function toDashboardSummary(raw: RawDashboardSummary): DashboardSummary {
 }
 
 export const httpDashboardRepository = {
-    async summary(): Promise<DashboardSummary> {
-        const { data } = await httpClient.get<RawDashboardSummary>('/dashboard');
+    /** `semester`: omitted/null = current; a number = that semester; 'all' = every semester (admins only). */
+    async summary(semester?: number | 'all' | null): Promise<DashboardSummary> {
+        const { data } = await httpClient.get<RawDashboardSummary>('/dashboard', {
+            params: semester === 'all' ? { scope: 'all' } : semester ? { semester_id: semester } : undefined,
+        });
         return toDashboardSummary(data);
     },
 };

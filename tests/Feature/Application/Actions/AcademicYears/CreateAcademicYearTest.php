@@ -17,7 +17,7 @@ function createAcademicYearTestAdmin(): Student
         'last_name' => 'Admin', 'first_name' => 'CSG',
         'department_id' => $department->id,
         'username' => 'csgadmin', 'password' => 'password',
-        'role' => 'csg_admin',
+        'role' => 'system_admin',
     ]);
 }
 
@@ -35,13 +35,11 @@ it('creates an academic year owned by the given creator', function () {
         ->and($academicYear->created_by)->toBe($admin->id);
 });
 
-it('retires the previously active academic year when creating a new active one', function () {
+it('always creates an academic year inactive and never retires the active one', function () {
     $admin = createAcademicYearTestAdmin();
-    $current = (new CreateAcademicYear)(['name' => '2025-2026', 'is_active' => true], $admin);
+    $current = AcademicYear::create(['name' => '2025-2026', 'is_active' => true, 'created_by' => $admin->id]);
 
     $next = (new CreateAcademicYear)(['name' => '2026-2027', 'is_active' => true], $admin);
 
-    expect($current->fresh()->is_active)->toBeFalse()
-        ->and($next->is_active)->toBeTrue()
-        ->and(AcademicYear::where('is_active', true)->count())->toBe(1);
+    expect($current->fresh()->is_active)->toBeTrue()->and($next->is_active)->toBeFalse();
 });

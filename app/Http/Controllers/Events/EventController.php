@@ -8,17 +8,31 @@ use App\Application\Actions\Events\UpdateEvent;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Events\StoreEventRequest;
 use App\Http\Requests\Events\UpdateEventRequest;
+use App\Domain\Support\SemesterScope;
 use App\Models\EventModel;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 
 class EventController extends Controller
 {
-    public function index()
+    /** Current semester by default (students always); `semester_id` / `scope=all` for others. */
+    public function index(Request $request)
     {
         Gate::authorize('viewAny', EventModel::class);
 
+        $filters = $request->validate([
+            'semester_id' => ['nullable', 'integer', 'exists:semesters,id'],
+            'scope' => ['nullable', 'string', 'in:all'],
+        ]);
+
+        $semesterId = SemesterScope::resolve($request->user(), $filters['scope'] ?? null, $filters['semester_id'] ?? null);
+
         return response()->json(
-            EventModel::with(['days.sessions', 'semester.academicYear', 'departments'])->orderByDesc('id')->get()
+            SemesterScope::events(
+                EventModel::with(['days.sessions', 'semester.academicYear', 'departments']),
+                $semesterId,
+                'events.semester_id',
+            )->orderByDesc('id')->get()
         );
     }
 

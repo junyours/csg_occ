@@ -59,7 +59,7 @@ function penaltyListApiPenalty(Student $creator, Student $target): AttendancePen
         'student_id' => $target->id,
         'session_id' => $session->id,
         'amount' => 25,
-        'reason' => 'Absent - Time In',
+        'reason' => 'Missed - Time In',
     ]);
 }
 

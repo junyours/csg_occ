@@ -14,9 +14,9 @@ export const DASHBOARD_QUERY_KEY = ['dashboard'];
  * bouncing to another tab (e.g. the QR page) and back to the dashboard
  * reads from cache instead of silently refetching.
  */
-export function useDashboard() {
+export function useDashboard(semester: number | 'all' | null = null) {
     return useQuery({
-        queryKey: DASHBOARD_QUERY_KEY,
-        queryFn: httpDashboardRepository.summary,
+        queryKey: [...DASHBOARD_QUERY_KEY, semester],
+        queryFn: () => httpDashboardRepository.summary(semester),
     });
 }

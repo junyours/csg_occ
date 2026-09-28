@@ -11,6 +11,7 @@ class AttendanceRecord extends Model
 {
     protected $fillable = [
         'session_id', 'student_id', 'scanned_at', 'status', 'scanned_by',
+        'department_id', 'major', 'section', 'year_level', 'semester_id', 'auto_present',
     ];
 
     protected function casts(): array
@@ -18,6 +19,19 @@ class AttendanceRecord extends Model
         return [
             'status' => AttendanceStatus::class,
             'scanned_at' => 'datetime',
+            'auto_present' => 'boolean',
+        ];
+    }
+
+    /** Enrollment context frozen onto a record; semester is the *event's*. */
+    public static function snapshotFor(Student $student, ?int $semesterId): array
+    {
+        return [
+            'department_id' => $student->department_id,
+            'major' => $student->major,
+            'section' => $student->section,
+            'year_level' => $student->year_level,
+            'semester_id' => $semesterId,
         ];
     }
 
@@ -45,7 +59,7 @@ class AttendanceRecord extends Model
     }
 
     /**
-     * Present/absent/late records inherit their event scope transitively
+     * Present/missed/late records inherit their event scope transitively
      * through session -> event_day -> event (no denormalized event_id
      * column here — see the events/semesters migration notes). This scope
      * is the query-time equivalent, letting dashboards fetch "every

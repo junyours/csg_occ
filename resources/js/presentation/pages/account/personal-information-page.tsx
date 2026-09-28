@@ -2,13 +2,15 @@ import { useRef, useState } from 'react';
 import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 
-import { Camera, GraduationCap, Hash, IdCard, UserRound } from 'lucide-react';
+import { Camera, GraduationCap, Hash, IdCard, KeyRound, UserRound } from 'lucide-react';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/application/auth/auth.store';
 import { useUpdateStudentPhoto } from '@/application/students/use-update-student-photo';
 import { AvatarPhotoEditor } from '@/presentation/components/avatar-photo-editor';
+import { ChangePasswordDialog } from '@/presentation/components/auth/change-password-dialog';
+import { SettingsRow } from '@/presentation/components/settings-row';
 import { Heading, Text } from '@/presentation/components/typography';
 import { Tile } from '@/presentation/components/tile';
 import type { Tone } from '@/presentation/components/tone';
@@ -64,6 +66,7 @@ export function PersonalInformationPage() {
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [pendingFile, setPendingFile] = useState<File | null>(null);
+    const [showChangePassword, setShowChangePassword] = useState(false);
 
     if (!student) return null;
 
@@ -158,6 +161,15 @@ export function PersonalInformationPage() {
                 <DetailRow label="Department" value={department} Icon={IdCard} tone="orange" />
                 <DetailRow label="Year & section" value={yearAndSection} Icon={GraduationCap} tone="emerald" />
             </div>
+
+            <div className="space-y-2">
+                <Text variant="caption">Security</Text>
+                <SettingsRow icon={<KeyRound />} tone="violet" onClick={() => setShowChangePassword(true)}>
+                    Change password
+                </SettingsRow>
+            </div>
+
+            <ChangePasswordDialog open={showChangePassword} onOpenChange={setShowChangePassword} />
 
             {pendingFile && (
                 <AvatarPhotoEditor

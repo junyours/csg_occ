@@ -5,7 +5,9 @@ namespace App\Application\Actions\Sessions;
 use App\Domain\Enums\Role;
 use App\Domain\Enums\SessionStatus;
 use App\Domain\Exceptions\SessionNotAcceptingScansException;
+use App\Domain\Exceptions\SessionScanTooEarlyException;
 use App\Domain\Exceptions\StaleQrCodeException;
+use App\Domain\Exceptions\StudentInactiveException;
 use App\Domain\Exceptions\StudentDepartmentNotIncludedException;
 use App\Domain\Exceptions\StudentExcludedException;
 use App\Domain\Exceptions\StudentNotEligibleForAttendanceException;
@@ -59,8 +61,14 @@ final class ScanAttendance
         // only quietly ignored later. Split into two checks (rather than
         // one call to Student::isAttendanceEligibleForEvent) so the
         // officer sees the actual reason instead of one generic message.
+        if ($student->role === Role::SystemAdmin) {
+            throw new StudentNotEligibleForAttendanceException('System Admin accounts do not have attendance.');
+        }
+
         if ($student->role !== Role::Student) {
-            throw new StudentNotEligibleForAttendanceException;
+            throw new StudentNotEligibleForAttendanceException(
+                'Attendance for staff accounts is recorded automatically when the session ends.'
+            );
         }
 
         $event = $session->eventDay->event;
@@ -73,6 +81,18 @@ final class ScanAttendance
             throw new SessionNotAcceptingScansException;
         }
 
+        // Belt-and-suspenders: StartSession already refuses to flip a
+        // session to Ongoing before its scheduled start time (server clock,
+        // never the caller's), so this should be unreachable in normal
+        // operation. Kept anyway so a scan can never be recorded ahead of
+        // the session's own window under any circumstance — including an
+        // officer's scanning device having its clock rolled back, which
+        // has no bearing here since Carbon::now() (this server's clock) is
+        // what's compared, not anything the device sent.
+        if (Carbon::now()->lessThan($session->window()->start())) {
+            throw new SessionScanTooEarlyException;
+        }
+
         $existing = AttendanceRecord::where('session_id', $session->id)
             ->where('student_id', $student->id)
             ->first();
@@ -82,6 +102,13 @@ final class ScanAttendance
             // this record is already real and stands regardless of any
             // exclusion added afterward (mid-window guard).
             return $existing;
+        }
+
+        // After the duplicate early-return on purpose: a student deactivated
+        // mid-event still gets their existing record back; one with none is
+        // blocked. Nothing is written or logged.
+        if ($student->isInactive()) {
+            throw new StudentInactiveException;
         }
 
         if (in_array($student->id, Exclusion::excludedStudentIdsForSession($session), true)) {
@@ -107,6 +134,7 @@ final class ScanAttendance
                 'scanned_at' => $now,
                 'status' => $session->window()->classify($now),
                 'scanned_by' => $scannedByStaffId,
+                ...AttendanceRecord::snapshotFor($student, $event->semester_id),
             ]);
         } catch (\Illuminate\Database\UniqueConstraintViolationException) {
             // Two officers scanning the same badge within milliseconds of

@@ -240,7 +240,7 @@ it('does not warn about a session that had already ended before the exclusion', 
     AttendanceRecord::create([
         'session_id' => $session->id,
         'student_id' => $student->id,
-        'status' => AttendanceStatus::Absent,
+        'status' => AttendanceStatus::Missed,
         'scanned_at' => null,
     ]);
 

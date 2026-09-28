@@ -27,7 +27,7 @@ export interface ScannedStudent {
 export interface ScanResult {
     recordId: number;
     outcome: ScanOutcome;
-    /** Present/Late/Absent classification for the session's single check. */
+    /** Present/Late/Missed classification for the session's single check. */
     status: AttendanceStatus;
     scannedAt: string | null;
     student: ScannedStudent;

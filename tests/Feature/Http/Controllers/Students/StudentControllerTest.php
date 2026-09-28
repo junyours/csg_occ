@@ -136,6 +136,7 @@ it('rejects student creation from an officer', function () {
 });
 
 it('lets a csg admin create a student in any department', function () {
+    seedActiveSemester();
     $admin = studentTestStaff('csg_admin', '2020000001');
     $department = studentTestDept('BSIT');
 
@@ -146,6 +147,7 @@ it('lets a csg admin create a student in any department', function () {
 });
 
 it('lets an sc admin create a student in their own administered department', function () {
+    seedActiveSemester();
     $bsit = studentTestDept('BSIT');
     $scAdmin = studentTestStaff('sc_admin', '2020300001', $bsit->id);
 
@@ -164,17 +166,121 @@ it('rejects an sc admin creating a student outside their administered department
         ->assertStatus(403);
 });
 
-it('rejects a duplicate student number', function () {
+it('answers 409 with update-mode data when the student number already exists', function () {
+    seedActiveSemester();
     $admin = studentTestStaff('csg_admin', '2020000001');
-    $department = studentTestDept('BSIT');
-    $payload = studentTestPayload($department);
+    $payload = studentTestPayload(studentTestDept('BSIT'));
 
     $this->actingAs($admin, 'sanctum')->postJson('/api/students', $payload)->assertStatus(201);
 
+    $this->actingAs($admin, 'sanctum')->postJson('/api/students', $payload)
+        ->assertStatus(409)
+        ->assertJsonPath('code', 'student_exists')
+        ->assertJsonPath('student.student_number', '2023105413');
+
+    expect(Student::where('student_number', '2023105413')->count())->toBe(1);
+});
+
+it('re-enrolls the existing student when update_existing is sent, leaving role and name alone', function () {
+    seedActiveSemester();
+    $admin = studentTestStaff('csg_admin', '2020000001');
+    $educ = studentTestDept('EDUC');
+    $existing = Student::create(array_merge(studentTestPayload(studentTestDept('BSIT')), [
+        'username' => 'u1', 'password' => 'password', 'role' => 'officer', 'status' => 'inactive',
+    ]));
+
     $this->actingAs($admin, 'sanctum')
-        ->postJson('/api/students', $payload)
-        ->assertStatus(422)
-        ->assertJsonValidationErrors('student_number');
+        ->postJson('/api/students', array_merge(studentTestPayload($educ), [
+            'last_name' => 'Changed', 'year_level' => '4', 'section' => '4B', 'update_existing' => true,
+        ]))
+        ->assertStatus(200)
+        ->assertJsonPath('department_id', $educ->id)
+        ->assertJsonPath('status', 'active');
+
+    $fresh = $existing->fresh();
+    expect($fresh->role->value)->toBe('officer')
+        ->and($fresh->last_name)->toBe('Cruz')
+        ->and($fresh->section)->toBe('4B')
+        ->and($fresh->semester_id)->not->toBeNull();
+});
+
+it('refuses to add or update a System Admin through single add', function () {
+    seedActiveSemester();
+    $admin = studentTestStaff('csg_admin', '2020000001');
+    studentTestStaff('system_admin', '2023105413');
+
+    $this->actingAs($admin, 'sanctum')
+        ->postJson('/api/students', array_merge(studentTestPayload(studentTestDept('BSIT')), ['update_existing' => true]))
+        ->assertStatus(422);
+});
+
+it('answers 422 when adding a student while no semester is active', function () {
+    $admin = studentTestStaff('csg_admin', '2020000001');
+
+    $this->actingAs($admin, 'sanctum')
+        ->postJson('/api/students', studentTestPayload(studentTestDept('BSIT')))
+        ->assertStatus(422);
+});
+
+it('filters the student list by status', function () {
+    $admin = studentTestStaff('csg_admin', '2020000001');
+    $bsit = studentTestDept('BSIT');
+    Student::create(array_merge(studentTestPayload($bsit, '2023000001'), ['username' => 'u1', 'password' => 'password']));
+    Student::create(array_merge(studentTestPayload($bsit, '2023000002'), ['username' => 'u2', 'password' => 'password', 'status' => 'inactive']));
+
+    $numbers = fn (string $q) => collect($this->actingAs($admin, 'sanctum')->getJson('/api/students?'.$q)->json('data'))->pluck('student_number');
+
+    expect($numbers('status=inactive'))->toContain('2023000002')->not->toContain('2023000001')
+        ->and($numbers('status=active'))->toContain('2023000001')->not->toContain('2023000002');
+});
+
+it('lets a csg admin edit a student in place, but not their number or role', function () {
+    $admin = studentTestStaff('csg_admin', '2020000001');
+    $student = Student::create(array_merge(studentTestPayload(studentTestDept('BSIT'), '2023000001'), ['username' => 'u1', 'password' => 'password']));
+
+    $this->actingAs($admin, 'sanctum')
+        ->patchJson("/api/students/{$student->id}", ['last_name' => 'Fixed', 'student_number' => 'HACK', 'role' => 'csg_admin'])
+        ->assertStatus(200)
+        ->assertJsonPath('last_name', 'Fixed');
+
+    expect($student->fresh()->student_number)->toBe('2023000001')
+        ->and($student->fresh()->role->value)->toBe('student');
+});
+
+it('keeps an sc admin to students of their own department when editing', function () {
+    $bsit = studentTestDept('BSIT');
+    $educ = studentTestDept('EDUC');
+    $scAdmin = studentTestStaff('sc_admin', '2020300001', $bsit->id);
+    $own = Student::create(array_merge(studentTestPayload($bsit, '2023000001'), ['username' => 'u1', 'password' => 'password']));
+    $foreign = Student::create(array_merge(studentTestPayload($educ, '2023000002'), ['username' => 'u2', 'password' => 'password']));
+
+    $this->actingAs($scAdmin, 'sanctum')->patchJson("/api/students/{$own->id}", ['section' => '1Z'])->assertStatus(200);
+    $this->actingAs($scAdmin, 'sanctum')->patchJson("/api/students/{$foreign->id}", ['section' => '1Z'])->assertStatus(403);
+    $this->actingAs($scAdmin, 'sanctum')->patchJson("/api/students/{$own->id}", ['department_id' => $educ->id])->assertStatus(403);
+});
+
+it('refuses to edit or change the status of a System Admin, or your own status', function () {
+    $admin = studentTestStaff('csg_admin', '2020000001');
+    $sys = studentTestStaff('system_admin', '2020000009');
+
+    $this->actingAs($admin, 'sanctum')->patchJson("/api/students/{$sys->id}", ['section' => '1Z'])->assertStatus(422);
+    $this->actingAs($admin, 'sanctum')->patchJson("/api/students/{$sys->id}/status", ['status' => 'inactive'])->assertStatus(422);
+    $this->actingAs($admin, 'sanctum')->patchJson("/api/students/{$admin->id}/status", ['status' => 'inactive'])->assertStatus(403);
+});
+
+it('toggles a student inactive (revoking tokens) and back to active in the current semester', function () {
+    $semester = seedActiveSemester();
+    $admin = studentTestStaff('csg_admin', '2020000001');
+    $target = Student::create(array_merge(studentTestPayload(studentTestDept('BSIT'), '2023000001'), ['username' => 'u1', 'password' => 'password']));
+    $target->createToken('api');
+
+    $this->actingAs($admin, 'sanctum')->patchJson("/api/students/{$target->id}/status", ['status' => 'inactive'])
+        ->assertStatus(200)->assertJsonPath('status', 'inactive');
+    expect($target->tokens()->count())->toBe(0);
+
+    $this->actingAs($admin, 'sanctum')->patchJson("/api/students/{$target->id}/status", ['status' => 'active'])
+        ->assertStatus(200)->assertJsonPath('status', 'active');
+    expect($target->fresh()->semester_id)->toBe($semester->id);
 });
 
 it('validates required fields on student creation', function () {

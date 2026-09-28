@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { CheckCircle2, Clock, MinusCircle, XCircle, type LucideIcon } from 'lucide-react';
 
 import { AutosuggestInput } from '@/components/ui/autosuggest-input';
@@ -14,6 +14,8 @@ import { useAttendanceHistory } from '@/application/attendance/use-attendance-hi
 import { useAttendanceHistoryFilterOptions } from '@/application/attendance/use-attendance-history-filter-options';
 import { useDepartments } from '@/application/departments/use-departments';
 import { useEvents } from '@/application/events/use-events';
+import { SemesterPicker, type SemesterSelection } from '@/presentation/components/semester-picker';
+import { SemesterGroupHeading } from '@/presentation/components/semester-group-heading';
 import type {
     AttendanceHistorySort,
     AttendanceHistoryStatusFilter,
@@ -31,14 +33,14 @@ import { Heading, Text } from '@/presentation/components/typography';
 import { TONE, type Tone } from '@/presentation/components/tone';
 import { UserAvatar } from '@/presentation/components/user-avatar';
 
-// Same status→hue mapping as the dashboard (present/late/absent/excluded).
+// Same status→hue mapping as the dashboard (present/late/missed/excluded).
 // The row's left edge now carries the student's photo, so this hue rides on
 // the small badge overlaid on that avatar (plus the pill on the right) —
 // a row is still legible at a glance without the status owning the tile.
 const STATUS_TONE: Record<AttendanceStatus, Tone> = {
     [AttendanceStatus.Present]: 'emerald',
     [AttendanceStatus.Late]: 'amber',
-    [AttendanceStatus.Absent]: 'red',
+    [AttendanceStatus.Missed]: 'red',
     [AttendanceStatus.Excluded]: 'neutral',
     [AttendanceStatus.Pending]: 'neutral',
 };
@@ -46,7 +48,7 @@ const STATUS_TONE: Record<AttendanceStatus, Tone> = {
 const STATUS_ICON: Record<AttendanceStatus, LucideIcon> = {
     [AttendanceStatus.Present]: CheckCircle2,
     [AttendanceStatus.Late]: Clock,
-    [AttendanceStatus.Absent]: XCircle,
+    [AttendanceStatus.Missed]: XCircle,
     [AttendanceStatus.Excluded]: MinusCircle,
     [AttendanceStatus.Pending]: Clock,
 };
@@ -63,7 +65,7 @@ const SORT_OPTIONS: { value: AttendanceHistorySort; label: string }[] = [
     { value: 'event', label: 'Event' },
 ];
 
-const STATUS_OPTIONS: AttendanceHistoryStatusFilter[] = ['all', 'present', 'late', 'absent', 'excluded'];
+const STATUS_OPTIONS: AttendanceHistoryStatusFilter[] = ['all', 'present', 'late', 'missed', 'excluded'];
 
 function isStatusFilter(value: string): value is AttendanceHistoryStatusFilter {
     return (STATUS_OPTIONS as string[]).includes(value);
@@ -83,7 +85,9 @@ export function AttendanceHistoryAdminPage() {
     const isOfficer = student?.role === Role.Officer;
 
     const { data: departments } = useDepartments();
-    const { data: events } = useEvents();
+    const [semesterSelection, setSemesterSelection] = useState<SemesterSelection>('current');
+    const semesterParam = semesterSelection === 'current' ? null : semesterSelection;
+    const { data: events } = useEvents(semesterParam);
     const { data: filterOptions } = useAttendanceHistoryFilterOptions();
 
     const [search, setSearch] = useState('');
@@ -107,6 +111,7 @@ export function AttendanceHistoryAdminPage() {
         eventId: eventFilter !== 'all' ? Number(eventFilter) : undefined,
         status: statusFilter,
         sort,
+        semester: semesterParam,
         major: debouncedMajor || undefined,
         yearLevel: debouncedYearLevel || undefined,
         section: debouncedSection || undefined,
@@ -132,6 +137,17 @@ export function AttendanceHistoryAdminPage() {
                     stays full-width, the selects pack 2-per-row on mobile
                     and go inline from `sm` up. */}
                 <div className="space-y-2 sm:flex sm:flex-wrap sm:items-start sm:gap-2 sm:space-y-0">
+                    <SemesterPicker
+                        value={semesterSelection}
+                        onChange={(value) => {
+                            setSemesterSelection(value);
+                            // The event list belongs to the previous semester.
+                            setEventFilter('all');
+                            setPage(1);
+                        }}
+                        allowAll
+                        className="w-full sm:w-64"
+                    />
                     <Input
                         placeholder="Search student or scanning officer…"
                         value={search}
@@ -259,11 +275,33 @@ export function AttendanceHistoryAdminPage() {
                     <Text variant="small">No attendance records match these filters.</Text>
                 )}
 
-                {historyPage?.data.map((row) => {
+                {historyPage?.data.map((row, index, rows) => {
                     const tone = STATUS_TONE[row.status];
                     const StatusIcon = STATUS_ICON[row.status];
+                    // "All semesters": the server keeps each semester's rows
+                    // together, so a heading goes above the first row of each
+                    // run. Its subtotal covers the whole filtered set.
+                    const startsSemester =
+                        semesterSelection === 'all' &&
+                        (index === 0 || rows[index - 1].semesterId !== row.semesterId);
+                    const semesterTotals = startsSemester
+                        ? historyPage?.semesterSummary?.find((group) => group.semesterId === row.semesterId)
+                        : undefined;
                     return (
-                        <Card key={row.id} className="overflow-hidden">
+                        <Fragment key={row.id}>
+                        {startsSemester && (
+                            <SemesterGroupHeading
+                                semesterName={semesterTotals?.semesterName ?? null}
+                                academicYearName={semesterTotals?.academicYearName ?? null}
+                                isCurrent={semesterTotals?.isCurrent ?? false}
+                                summary={
+                                    semesterTotals
+                                        ? `${semesterTotals.count} records · ${semesterTotals.present} present · ${semesterTotals.late} late · ${semesterTotals.missed} missed · ${semesterTotals.excluded} excluded`
+                                        : ''
+                                }
+                            />
+                        )}
+                        <Card className="overflow-hidden">
                             <CardContent className="space-y-4">
                                 <div className="flex items-start justify-between gap-4">
                                     <div className="flex min-w-0 items-center gap-4">
@@ -301,15 +339,18 @@ export function AttendanceHistoryAdminPage() {
                                 </Text>
 
                                 {/* The audit ask itself: who scanned it and when.
-                                    No scan exists for Absent/Excluded/Pending
+                                    No scan exists for Missed/Excluded/Pending
                                     rows, so there's nothing to attribute. */}
                                 <Text variant="caption">
-                                    {row.scannedByName
+                                    {row.autoPresent
+                                        ? 'Auto — staff (recorded when the session ended)'
+                                        : row.scannedByName
                                         ? `Scanned by ${row.scannedByName}${row.scannedByRole && row.scannedByRole !== Role.Officer ? ` (${ROLE_LABEL[row.scannedByRole as Role]})` : ''}${row.scannedAt ? ` on ${formatScannedAt(row.scannedAt)}` : ''}`
                                         : 'Not scanned'}
                                 </Text>
                             </CardContent>
                         </Card>
+                        </Fragment>
                     );
                 })}
 

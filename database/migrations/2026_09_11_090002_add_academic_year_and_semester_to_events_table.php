@@ -9,7 +9,7 @@ return new class extends Migration
     /**
      * Run the migrations.
      *
-     * Everything that needs to be scoped by academic year — present/absent/
+     * Everything that needs to be scoped by academic year — present/missed/
      * late records, penalties — hangs off an event through
      * event -> event_day -> session, so the event is the single place the
      * academic year (and semester within it) needs to be recorded; nothing

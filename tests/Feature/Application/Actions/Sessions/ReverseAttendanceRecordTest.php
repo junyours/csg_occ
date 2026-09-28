@@ -167,7 +167,7 @@ it('treats a whitespace-only reason as no reason at all', function () {
 });
 
 it('refuses to reverse once the session has ended, leaving the record intact', function () {
-    // After EndSession runs, the absent sweep and the penalty ledger
+    // After EndSession runs, the missed sweep and the penalty ledger
     // writes have already happened — deleting a record then would drop
     // the student out of the session's reports entirely instead of
     // returning them to pending.

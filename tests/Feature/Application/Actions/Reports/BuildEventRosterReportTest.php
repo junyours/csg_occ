@@ -38,7 +38,7 @@ function rosterEvent(): EventModel
             'last_name' => 'Admin', 'first_name' => 'CSG',
             'department_id' => rosterDept('CCS')->id,
             'username' => 'csgadmin', 'password' => 'password',
-            'role' => Role::CsgAdmin,
+            'role' => Role::SystemAdmin,
         ],
     );
 
@@ -55,7 +55,7 @@ function rosterAdmin(): Student
             'last_name' => 'Admin', 'first_name' => 'CSG',
             'department_id' => rosterDept('CCS')->id,
             'username' => 'csgadmin', 'password' => 'password',
-            'role' => Role::CsgAdmin,
+            'role' => Role::SystemAdmin,
         ],
     );
 }
@@ -157,11 +157,11 @@ it('reflects a present scan and an ended-session absence across different sessio
     $sessions = $report['groups'][0]['students'][0]['sessions'];
 
     expect($sessions[$scannedSession->id])->toBe('present')
-        ->and($sessions[$endedSession->id])->toBe('absent')
+        ->and($sessions[$endedSession->id])->toBe('missed')
         ->and($report['groups'][0]['students'][0]['penalty_total'])->toBe(25.0);
 });
 
-it('shows an event-wide excluded student as excluded rather than absent after the session ends', function () {
+it('shows an event-wide excluded student as excluded rather than missed after the session ends', function () {
     $event = rosterEvent();
     $session = rosterSession($event);
     $student = rosterStudent('2023000008');
@@ -222,7 +222,7 @@ it('filters the roster to a single department, year level, and section', functio
         ->and($report['groups'][0]['students'][0]['student_number'])->toBe('2023000012');
 });
 
-it('reads a reversed absence as reversed rather than absent, and stops charging for it', function () {
+it('reads a reversed absence as reversed rather than missed, and stops charging for it', function () {
     $event = rosterEvent();
     $session = rosterSession($event);
     $student = rosterStudent('2023000020');
@@ -230,9 +230,9 @@ it('reads a reversed absence as reversed rather than absent, and stops charging 
     (new EndSession)($session);
 
     // The precondition this test is really about: before the reversal the
-    // cell is a plain Absent worth the session's absent penalty.
+    // cell is a plain Missed worth the session's missed penalty.
     $before = (new BuildEventRosterReport)($event)['groups'][0]['students'][0];
-    expect($before['sessions'][$session->id])->toBe('absent')
+    expect($before['sessions'][$session->id])->toBe('missed')
         ->and($before['penalty_total'])->toBe(25.0);
 
     $penalty = AttendancePenalty::where('student_id', $student->id)
@@ -280,7 +280,7 @@ it('leaves an excluded session reading excluded even when a penalty for it was r
         'student_id' => $student->id,
         'session_id' => $session->id,
         'amount' => 25,
-        'reason' => 'Absent - Time In (charged in error)',
+        'reason' => 'Missed - Time In (charged in error)',
     ]);
     (new ReversePenalty)($penalty, 'Student was excluded, charged in error', rosterAdmin());
 
@@ -300,7 +300,7 @@ it('does not let an event-scope exclusion added after a session ended rewrite it
     Carbon::setTestNow(Carbon::parse('2026-11-10 09:00:00', 'Asia/Manila'));
 
     // §2 rule 1 / §6a: the session had already ended when this was
-    // created, so it is outside the cascade entirely — Absent stands.
+    // created, so it is outside the cascade entirely — Missed stands.
     Exclusion::create([
         'student_id' => $student->id,
         'event_id' => $event->id,
@@ -310,7 +310,7 @@ it('does not let an event-scope exclusion added after a session ended rewrite it
     ]);
 
     expect((new BuildEventRosterReport)($event)['groups'][0]['students'][0]['sessions'][$session->id])
-        ->toBe('absent');
+        ->toBe('missed');
 });
 
 it('does not read as reversed while a live penalty for the same session survives', function () {
@@ -333,11 +333,28 @@ it('does not read as reversed while a live penalty for the same session survives
         'student_id' => $student->id,
         'session_id' => $session->id,
         'amount' => 25,
-        'reason' => 'Absent - Time In (re-charged)',
+        'reason' => 'Missed - Time In (re-charged)',
     ]);
 
     $row = (new BuildEventRosterReport)($event)['groups'][0]['students'][0];
 
-    expect($row['sessions'][$session->id])->toBe('absent')
+    expect($row['sessions'][$session->id])->toBe('missed')
         ->and($row['penalty_total'])->toBe(25.0);
+});
+
+it('lists the sessions where staff were auto-marked present, so exports can label them', function () {
+    $event = rosterEvent();
+    $session = rosterSession($event);
+    rosterStudent('2023009001', 'BSIT', ['role' => Role::Officer]);
+    rosterStudent('2023009002');
+
+    (new EndSession)($session);
+
+    $report = (new BuildEventRosterReport)($event);
+    $rows = collect($report['groups'])->flatMap(fn ($group) => $group['students'])->keyBy('student_number');
+
+    expect($rows['2023009001']['sessions'][$session->id])->toBe('present')
+        ->and($rows['2023009001']['auto_sessions'])->toBe([$session->id])
+        ->and($rows['2023009002']['sessions'][$session->id])->toBe('missed')
+        ->and($rows['2023009002']['auto_sessions'])->toBe([]);
 });

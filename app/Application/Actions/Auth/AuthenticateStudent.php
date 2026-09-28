@@ -2,6 +2,8 @@
 
 namespace App\Application\Actions\Auth;
 
+use App\Domain\Enums\Role;
+use App\Domain\Exceptions\AccountInactiveException;
 use App\Domain\Exceptions\InvalidCredentialsException;
 use App\Models\Student;
 use Illuminate\Support\Facades\Hash;
@@ -21,6 +23,11 @@ final class AuthenticateStudent
             // Same exception and message whether the username doesn't exist
             // or the password is wrong — never reveal which one it was.
             throw new InvalidCredentialsException;
+        }
+
+        // Only after the credentials check, so this can't reveal usernames.
+        if ($student->isInactive() && $student->role !== Role::SystemAdmin) {
+            throw new AccountInactiveException;
         }
 
         $token = $student->createToken('api')->plainTextToken;

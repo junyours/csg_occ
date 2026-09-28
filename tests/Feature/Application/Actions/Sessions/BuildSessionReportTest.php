@@ -36,7 +36,7 @@ function reportEvent(): EventModel
             'last_name' => 'Admin', 'first_name' => 'CSG',
             'department_id' => reportDept('CCS')->id,
             'username' => 'csgadmin', 'password' => 'password',
-            'role' => Role::CsgAdmin,
+            'role' => Role::SystemAdmin,
         ],
     );
 
@@ -80,14 +80,14 @@ function reportStudent(string $studentNumber, string $deptCode = 'CS', array $ov
     ], $overrides));
 }
 
-it('reports a not-yet-scanned student as pending, not absent, while the session is still open', function () {
+it('reports a not-yet-scanned student as pending, not missed, while the session is still open', function () {
     $session = reportSession();
     reportStudent('2023000001');
 
     $report = (new BuildSessionReport)($session);
 
     expect($report['summary']['pending'])->toBe(1)
-        ->and($report['summary']['absent'])->toBe(0)
+        ->and($report['summary']['missed'])->toBe(0)
         ->and($report['students'][0]['status'])->toBeNull();
 });
 
@@ -104,7 +104,7 @@ it('reports a present scan correctly and includes their penalty amount', functio
         ->and($report['students'][0]['penalty_amount'])->toBe(0.0);
 });
 
-it('reports an excluded student as excluded rather than absent, even after the session ends', function () {
+it('reports an excluded student as excluded rather than missed, even after the session ends', function () {
     $session = reportSession();
     $event = $session->eventDay->event;
     $excluded = reportStudent('2023000003');
@@ -121,21 +121,21 @@ it('reports an excluded student as excluded rather than absent, even after the s
     $report = (new BuildSessionReport)($session);
 
     expect($report['summary']['excluded'])->toBe(1)
-        ->and($report['summary']['absent'])->toBe(0)
+        ->and($report['summary']['missed'])->toBe(0)
         ->and($report['students'][0]['status'])->toBe('excluded')
         ->and($report['students'][0]['penalty_amount'])->toBe(0.0);
 });
 
-it('reports absent students with their penalty amount once the session has ended', function () {
+it('reports missed students with their penalty amount once the session has ended', function () {
     $session = reportSession();
     reportStudent('2023000004');
 
     (new EndSession)($session);
     $report = (new BuildSessionReport)($session);
 
-    expect($report['summary']['absent'])->toBe(1)
+    expect($report['summary']['missed'])->toBe(1)
         ->and($report['summary']['pending'])->toBe(0)
-        ->and($report['students'][0]['status'])->toBe('absent')
+        ->and($report['students'][0]['status'])->toBe('missed')
         ->and($report['students'][0]['penalty_amount'])->toBe(25.0);
 });
 

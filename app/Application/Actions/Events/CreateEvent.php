@@ -3,9 +3,8 @@
 namespace App\Application\Actions\Events;
 
 use App\Domain\Exceptions\NoActiveSemesterException;
-use App\Models\AcademicYear;
+use App\Domain\Support\CurrentSemester;
 use App\Models\EventModel;
-use App\Models\Semester;
 use App\Models\Student;
 
 final class CreateEvent
@@ -45,16 +44,6 @@ final class CreateEvent
 
     private function resolveActiveSemesterId(): int
     {
-        $activeAcademicYear = AcademicYear::active()->first();
-
-        $activeSemester = $activeAcademicYear
-            ? Semester::active()->forAcademicYear($activeAcademicYear->id)->first()
-            : null;
-
-        if (! $activeSemester) {
-            throw new NoActiveSemesterException;
-        }
-
-        return $activeSemester->id;
+        return CurrentSemester::id() ?? throw new NoActiveSemesterException;
     }
 }

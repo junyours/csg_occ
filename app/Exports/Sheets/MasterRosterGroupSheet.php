@@ -56,15 +56,20 @@ final class MasterRosterGroupSheet implements FromArray, ShouldAutoSize, WithEve
         ['FFC7CE', '9C0006'], // Excel "Bad" — red/pink
     ];
 
+    // Semester header row — only drawn when the report spans semesters.
+    // Neutral slate so it reads as a level above the coloured events.
+    private const SEMESTER_FILL = 'CBD5E1'; // slate-300
+    private const SEMESTER_TEXT = '0F172A'; // slate-900
+
     /** status value => [fill, text color] — already candy-pastel, unchanged */
     private const STATUS_COLORS = [
         'present' => ['D1FAE5', '065F46'],
         'late' => ['FEF3C7', '92400E'],
-        'absent' => ['FEE2E2', '991B1B'],
+        'missed' => ['FEE2E2', '991B1B'],
         'excluded' => ['F3F4F6', '374151'],
         'pending' => ['F9FAFB', '6B7280'],
         // See EventRosterGroupSheet — same indigo as the PDF's
-        // .status-reversed, kept clear of Absent's red on purpose.
+        // .status-reversed, kept clear of Missed's red on purpose.
         'reversed' => ['E0E7FF', '3730A3'],
     ];
 
@@ -73,11 +78,19 @@ final class MasterRosterGroupSheet implements FromArray, ShouldAutoSize, WithEve
         private readonly array $sessions,
         private readonly array $events,
         private readonly mixed $onSheetWritten = null,
+        private readonly array $semesters = [],
     ) {}
 
     public function title(): string
     {
-        $title = trim(sprintf('%s%s %s%s', $this->group['department_code'], $this->group['major'] ? '-'.$this->group['major'] : '', $this->group['year_level'], $this->group['section']));
+        // The section already carries its year ("4C"), so the year level is
+        // only prefixed when the section doesn't start with it: "BSIT 4C",
+        // not "BSIT 44C".
+        $year = (string) $this->group['year_level'];
+        $section = (string) $this->group['section'];
+        $yearPart = $year !== '' && str_starts_with($section, $year) ? '' : $year;
+
+        $title = trim(sprintf('%s%s %s%s', $this->group['department_code'], $this->group['major'] ? '-'.$this->group['major'] : '', $yearPart, $section));
 
         return substr($title !== '' ? $title : 'Group', 0, 31);
     }
@@ -103,7 +116,10 @@ final class MasterRosterGroupSheet implements FromArray, ShouldAutoSize, WithEve
             $row = [$student['student_number'], $student['last_name'], $student['first_name']];
 
             foreach ($this->sessions as $session) {
-                $row[] = $this->formatCell($student['sessions'][$session['id']] ?? null);
+                $row[] = $this->formatCell(
+                    $student['sessions'][$session['id']] ?? null,
+                    in_array($session['id'], $student['auto_sessions'] ?? [], true),
+                );
             }
 
             $row[] = number_format($student['penalty_total'], 2);
@@ -120,9 +136,16 @@ final class MasterRosterGroupSheet implements FromArray, ShouldAutoSize, WithEve
         return $rows;
     }
 
-    private function formatCell(?string $status): string
+    private function formatCell(?string $status, bool $auto = false): string
     {
-        return $status ? ucfirst($status) : 'Pending';
+        if (! $status) {
+            return 'Pending';
+        }
+
+        // Staff whose Present was written automatically at session end
+        // (no scan) read "Present (Auto — staff)"; the cell colour still
+        // comes from the raw status, so it stays green.
+        return ucfirst($status).($auto && $status === 'present' ? ' (Auto — staff)' : '');
     }
 
     /**
@@ -132,6 +155,9 @@ final class MasterRosterGroupSheet implements FromArray, ShouldAutoSize, WithEve
      *   Row 1  merged banner  — "Master Roster Report"
      *   Row 2  merged banner  — group name
      *   Row 3  meta line      — generated-on date + student count
+     *   Row 4  Semester header — only when the report spans semesters
+     *          (optional)       (merged across that semester's events);
+     *                           everything below then shifts down one row
      *   Row 4  Event header   — only present when there are session
      *          (optional)       columns at all ("Event 1", merged
      *                           across its days)
@@ -155,7 +181,14 @@ final class MasterRosterGroupSheet implements FromArray, ShouldAutoSize, WithEve
 
                 $eventColumns = RosterReportColumnGrouper::groupByEventDayAndWindow($this->sessions);
                 $hasSessionColumns = count($eventColumns) > 0;
-                $extraHeaderRows = $hasSessionColumns ? 3 : 0;
+
+                // One more header row when the report spans semesters, so
+                // each semester's events sit under a labelled block.
+                $semesterColumns = $hasSessionColumns && count($this->semesters) > 1
+                    ? RosterReportColumnGrouper::groupBySemester($eventColumns, $this->semesters)
+                    : [];
+                $hasSemesterRow = $semesterColumns !== [];
+                $extraHeaderRows = $hasSessionColumns ? ($hasSemesterRow ? 4 : 3) : 0;
 
                 $sheet->insertNewRowBefore(1, 3 + $extraHeaderRows);
 
@@ -168,10 +201,12 @@ final class MasterRosterGroupSheet implements FromArray, ShouldAutoSize, WithEve
                 $this->styleHeaderRow($sheet, $headerRow, $lastColumn);
 
                 if ($hasSessionColumns) {
-                    $eventRow = 4;
-                    $dayRow = 5;
-                    $windowRow = 6;
-                    $this->styleEventDayWindowHeaders($sheet, $eventColumns, $eventRow, $dayRow, $windowRow, $headerRow, $lastColumn);
+                    $topRow = 4;
+                    $semesterRow = $hasSemesterRow ? 4 : null;
+                    $eventRow = $hasSemesterRow ? 5 : 4;
+                    $dayRow = $eventRow + 1;
+                    $windowRow = $eventRow + 2;
+                    $this->styleEventDayWindowHeaders($sheet, $eventColumns, $semesterColumns, $topRow, $semesterRow, $eventRow, $dayRow, $windowRow, $headerRow, $lastColumn);
                 }
                 $this->styleDataRows($sheet, $firstDataRow, $studentCount, $lastColumn);
                 $this->styleTotalRow($sheet, $totalRow, $lastColumn);
@@ -202,27 +237,53 @@ final class MasterRosterGroupSheet implements FromArray, ShouldAutoSize, WithEve
      * configured" rule as the single-event PDF/sheet, just with the
      * event grouping added on top.
      */
-    private function styleEventDayWindowHeaders($sheet, array $eventColumns, int $eventRow, int $dayRow, int $windowRow, int $checkRow, string $lastColumn): void
+    private function styleEventDayWindowHeaders($sheet, array $eventColumns, array $semesterColumns, int $topRow, ?int $semesterRow, int $eventRow, int $dayRow, int $windowRow, int $checkRow, string $lastColumn): void
     {
+        // Static columns (Student No./Last/First, Penalty Total) span the
+        // whole header block, from its top row — the semester row when
+        // there is one, otherwise the event row — down to the check row.
         foreach (['A', 'B', 'C'] as $staticColumn) {
-            $sheet->setCellValue("{$staticColumn}{$eventRow}", $sheet->getCell("{$staticColumn}{$checkRow}")->getValue());
+            $sheet->setCellValue("{$staticColumn}{$topRow}", $sheet->getCell("{$staticColumn}{$checkRow}")->getValue());
             $sheet->setCellValue("{$staticColumn}{$checkRow}", null);
-            $sheet->mergeCells("{$staticColumn}{$eventRow}:{$staticColumn}{$checkRow}");
-            $sheet->getStyle("{$staticColumn}{$eventRow}")->applyFromArray([
+            $sheet->mergeCells("{$staticColumn}{$topRow}:{$staticColumn}{$checkRow}");
+            $sheet->getStyle("{$staticColumn}{$topRow}")->applyFromArray([
                 'font' => ['bold' => true, 'size' => 10, 'color' => ['argb' => 'FF'.self::STATIC_TEXT]],
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => 'FF'.self::STATIC_FILL]],
                 'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
             ]);
         }
 
-        $sheet->setCellValue("{$lastColumn}{$eventRow}", $sheet->getCell("{$lastColumn}{$checkRow}")->getValue());
+        $sheet->setCellValue("{$lastColumn}{$topRow}", $sheet->getCell("{$lastColumn}{$checkRow}")->getValue());
         $sheet->setCellValue("{$lastColumn}{$checkRow}", null);
-        $sheet->mergeCells("{$lastColumn}{$eventRow}:{$lastColumn}{$checkRow}");
-        $sheet->getStyle("{$lastColumn}{$eventRow}")->applyFromArray([
+        $sheet->mergeCells("{$lastColumn}{$topRow}:{$lastColumn}{$checkRow}");
+        $sheet->getStyle("{$lastColumn}{$topRow}")->applyFromArray([
             'font' => ['bold' => true, 'size' => 10, 'color' => ['argb' => 'FF'.self::PENALTY_TEXT]],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => 'FF'.self::PENALTY_FILL]],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
         ]);
+
+        if ($semesterRow !== null) {
+            $semesterCol = 4;
+
+            foreach ($semesterColumns as $semesterColumn) {
+                $start = Coordinate::stringFromColumnIndex($semesterCol);
+                $end = Coordinate::stringFromColumnIndex($semesterCol + $semesterColumn['span'] - 1);
+
+                if ($end !== $start) {
+                    $sheet->mergeCells("{$start}{$semesterRow}:{$end}{$semesterRow}");
+                }
+                $sheet->setCellValue("{$start}{$semesterRow}", $semesterColumn['label']);
+                $sheet->getStyle("{$start}{$semesterRow}:{$end}{$semesterRow}")->applyFromArray([
+                    'font' => ['bold' => true, 'size' => 11, 'color' => ['argb' => 'FF'.self::SEMESTER_TEXT]],
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => 'FF'.self::SEMESTER_FILL]],
+                    'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
+                ]);
+
+                $semesterCol += $semesterColumn['span'];
+            }
+
+            $sheet->getRowDimension($semesterRow)->setRowHeight(24);
+        }
 
         $col = 4; // column D — the first session column, after Student No./Last/First
         $paletteSize = count(self::EVENT_PALETTE);

@@ -173,3 +173,35 @@ it('reports excluded rather than pending', function () {
 
     expect($response[0]['attendance_status'])->toBe('excluded');
 });
+
+it('flags a staff member\'s auto-present row so the screens can label it "Auto — staff"', function () {
+    $staff = historyTestStudent('csg_admin', '2020000031');
+
+    $event = EventModel::create(['name' => 'Intramurals 2026', 'created_by' => $staff->id]);
+    $day = EventDay::create(['event_id' => $event->id, 'date' => '2026-11-10', 'day_number' => 1]);
+    $auto = AttendanceSession::create([
+        'event_day_id' => $day->id, 'window_type' => 'morning', 'check_type' => 'time_in',
+        'start_time' => '07:00', 'end_time' => '08:00', 'status' => 'ended',
+    ]);
+    $scanned = AttendanceSession::create([
+        'event_day_id' => $day->id, 'window_type' => 'afternoon', 'check_type' => 'time_in',
+        'start_time' => '13:00', 'end_time' => '14:00', 'status' => 'ended',
+    ]);
+
+    AttendanceRecord::create([
+        'session_id' => $auto->id, 'student_id' => $staff->id,
+        'scanned_at' => now(), 'scanned_by' => null, 'status' => 'present', 'auto_present' => true,
+    ]);
+    AttendanceRecord::create([
+        'session_id' => $scanned->id, 'student_id' => $staff->id,
+        'scanned_at' => now(), 'scanned_by' => $staff->id, 'status' => 'present',
+    ]);
+
+    $entries = collect($this->actingAs($staff, 'sanctum')
+        ->getJson('/api/my-attendance-history')
+        ->assertStatus(200)
+        ->json('entries'))->keyBy('session_id');
+
+    expect($entries[$auto->id]['auto_present'])->toBeTrue()
+        ->and($entries[$scanned->id]['auto_present'])->toBeFalse();
+});

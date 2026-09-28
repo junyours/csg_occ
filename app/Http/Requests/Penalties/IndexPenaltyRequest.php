@@ -23,6 +23,8 @@ class IndexPenaltyRequest extends FormRequest
             // same fields StudentController's own search filter checks.
             'search' => ['nullable', 'string', 'max:255'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'semester_id' => ['nullable', 'integer', 'exists:semesters,id'],
+            'scope' => ['nullable', 'string', Rule::in(['all'])],
         ];
     }
 }

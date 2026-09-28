@@ -71,8 +71,14 @@ export function StudentEventDaySection({ day }: { day: MyAttendanceDay }) {
                                         <Badge variant="secondary" className={ATTENDANCE_STATUS_BADGE_CLASS[session.attendanceStatus]}>
                                             {ATTENDANCE_STATUS_LABEL[session.attendanceStatus]}
                                         </Badge>
-                                        {session.scannedAt && <Text variant="caption">{formatScannedAt(session.scannedAt)}</Text>}
-                                        {session.scannedByName && <Text variant="caption">Scanned by {session.scannedByName}</Text>}
+                                        {session.autoPresent ? (
+                                            <Text variant="caption">Auto — staff</Text>
+                                        ) : (
+                                            <>
+                                                {session.scannedAt && <Text variant="caption">{formatScannedAt(session.scannedAt)}</Text>}
+                                                {session.scannedByName && <Text variant="caption">Scanned by {session.scannedByName}</Text>}
+                                            </>
+                                        )}
                                     </div>
                                 )}
                             </div>

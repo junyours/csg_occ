@@ -2,6 +2,7 @@
 
 use App\Models\AcademicYear;
 use App\Models\Department;
+use App\Models\Semester;
 use App\Models\Student;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -32,7 +33,7 @@ it('rejects an unauthenticated academic year list request', function () {
 });
 
 it('lets any authenticated role list academic years', function () {
-    $admin = academicYearTestStaff('csg_admin', '2020000001');
+    $admin = academicYearTestStaff('system_admin', '2020000001');
     AcademicYear::create(['name' => '2026-2027', 'created_by' => $admin->id]);
     $officer = academicYearTestStaff('officer', '2020200001');
 
@@ -50,74 +51,64 @@ it('rejects academic year creation from a non-admin role', function () {
         ->assertStatus(403);
 });
 
-it('lets a csg admin create an academic year', function () {
-    $admin = academicYearTestStaff('csg_admin', '2020000001');
+it('lets a system admin create an academic year, always inactive', function () {
+    $admin = academicYearTestStaff('system_admin', '2020000001');
 
     $this->actingAs($admin, 'sanctum')
-        ->postJson('/api/academic-years', [
-            'name' => '2026-2027',
-            'start_date' => '2026-08-01',
-            'end_date' => '2027-05-31',
-        ])
-        ->assertStatus(201)
-        ->assertJsonPath('name', '2026-2027')
-        ->assertJsonPath('is_active', false);
+        ->postJson('/api/academic-years', ['name' => '2026-2027', 'start_date' => '2026-08-01', 'end_date' => '2027-05-31', 'is_active' => true])
+        ->assertStatus(201)->assertJsonPath('is_active', false);
+});
+
+it('rejects academic year create/edit/activate/deactivate from a csg admin', function () {
+    $sys = academicYearTestStaff('system_admin', '2020000009');
+    $csg = academicYearTestStaff('csg_admin', '2020000001');
+    $year = AcademicYear::create(['name' => '2026-2027', 'created_by' => $sys->id]);
+
+    $this->actingAs($csg, 'sanctum')->postJson('/api/academic-years', ['name' => '2027-2028'])->assertStatus(403);
+    $this->actingAs($csg, 'sanctum')->patchJson("/api/academic-years/{$year->id}", ['name' => 'x'])->assertStatus(403);
+    $this->actingAs($csg, 'sanctum')->postJson("/api/academic-years/{$year->id}/activate")->assertStatus(403);
+    $this->actingAs($csg, 'sanctum')->postJson("/api/academic-years/{$year->id}/deactivate")->assertStatus(403);
 });
 
 it('rejects a duplicate academic year name', function () {
-    $admin = academicYearTestStaff('csg_admin', '2020000001');
+    $admin = academicYearTestStaff('system_admin', '2020000001');
     AcademicYear::create(['name' => '2026-2027', 'created_by' => $admin->id]);
 
-    $this->actingAs($admin, 'sanctum')
-        ->postJson('/api/academic-years', ['name' => '2026-2027'])
-        ->assertStatus(422)
-        ->assertJsonValidationErrors('name');
+    $this->actingAs($admin, 'sanctum')->postJson('/api/academic-years', ['name' => '2026-2027'])
+        ->assertStatus(422)->assertJsonValidationErrors('name');
 });
 
-it('lets a csg admin edit an academic year without touching is_active', function () {
-    $admin = academicYearTestStaff('csg_admin', '2020000001');
-    $year = AcademicYear::create(['name' => '2026-2027', 'is_active' => true, 'created_by' => $admin->id]);
-
-    $this->actingAs($admin, 'sanctum')
-        ->patchJson("/api/academic-years/{$year->id}", ['name' => '2026-2027 (Revised)'])
-        ->assertStatus(200)
-        ->assertJsonPath('name', '2026-2027 (Revised)')
-        ->assertJsonPath('is_active', true);
-});
-
-it('lets a csg admin activate an academic year, retiring the previous one', function () {
-    $admin = academicYearTestStaff('csg_admin', '2020000001');
+it('lets a system admin edit, activate and deactivate academic years', function () {
+    $admin = academicYearTestStaff('system_admin', '2020000001');
     $old = AcademicYear::create(['name' => '2025-2026', 'is_active' => true, 'created_by' => $admin->id]);
-    $new = AcademicYear::create(['name' => '2026-2027', 'is_active' => false, 'created_by' => $admin->id]);
+    $new = AcademicYear::create(['name' => '2026-2027', 'created_by' => $admin->id]);
 
-    $this->actingAs($admin, 'sanctum')
-        ->postJson("/api/academic-years/{$new->id}/activate")
-        ->assertStatus(200)
-        ->assertJsonPath('is_active', true);
-
+    $this->actingAs($admin, 'sanctum')->patchJson("/api/academic-years/{$old->id}", ['name' => '2025-2026 (Revised)'])
+        ->assertStatus(200)->assertJsonPath('is_active', true);
+    $this->actingAs($admin, 'sanctum')->postJson("/api/academic-years/{$new->id}/activate")
+        ->assertStatus(200)->assertJsonPath('is_active', true);
     expect($old->fresh()->is_active)->toBeFalse();
+    $this->actingAs($admin, 'sanctum')->postJson("/api/academic-years/{$new->id}/deactivate")
+        ->assertStatus(200)->assertJsonPath('is_active', false);
 });
 
-it('lets a csg admin deactivate an academic year', function () {
-    $admin = academicYearTestStaff('csg_admin', '2020000001');
-    $year = AcademicYear::create(['name' => '2026-2027', 'is_active' => true, 'created_by' => $admin->id]);
+it('answers 409 activating/deactivating an academic year while a semester is active', function () {
+    $admin = academicYearTestStaff('system_admin', '2020000001');
+    $running = AcademicYear::create(['name' => '2025-2026', 'is_active' => true, 'created_by' => $admin->id]);
+    Semester::create(['academic_year_id' => $running->id, 'name' => 'semester_1', 'is_active' => true, 'created_by' => $admin->id]);
+    $next = AcademicYear::create(['name' => '2026-2027', 'created_by' => $admin->id]);
 
-    $this->actingAs($admin, 'sanctum')
-        ->postJson("/api/academic-years/{$year->id}/deactivate")
-        ->assertStatus(200)
-        ->assertJsonPath('is_active', false);
+    $this->actingAs($admin, 'sanctum')->postJson("/api/academic-years/{$next->id}/activate")->assertStatus(409);
+    $this->actingAs($admin, 'sanctum')->postJson("/api/academic-years/{$running->id}/deactivate")->assertStatus(409);
+
+    expect($running->fresh()->is_active)->toBeTrue();
 });
 
 it('rejects activate/deactivate from a non-admin role', function () {
-    $admin = academicYearTestStaff('csg_admin', '2020000001');
+    $admin = academicYearTestStaff('system_admin', '2020000001');
     $officer = academicYearTestStaff('officer', '2020200001');
     $year = AcademicYear::create(['name' => '2026-2027', 'created_by' => $admin->id]);
 
-    $this->actingAs($officer, 'sanctum')
-        ->postJson("/api/academic-years/{$year->id}/activate")
-        ->assertStatus(403);
-
-    $this->actingAs($officer, 'sanctum')
-        ->postJson("/api/academic-years/{$year->id}/deactivate")
-        ->assertStatus(403);
+    $this->actingAs($officer, 'sanctum')->postJson("/api/academic-years/{$year->id}/activate")->assertStatus(403);
+    $this->actingAs($officer, 'sanctum')->postJson("/api/academic-years/{$year->id}/deactivate")->assertStatus(403);
 });

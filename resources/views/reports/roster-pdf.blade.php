@@ -32,10 +32,11 @@
     .status { text-align: center; border-radius: 2px; }
     .status-present { background: #d1fae5; color: #065f46; font-weight: bold; }
     .status-late { background: #fef3c7; color: #92400e; }
-    .status-absent { background: #fee2e2; color: #991b1b; }
+    .status-missed { background: #fee2e2; color: #991b1b; }
     .status-excluded { background: #f3f4f6; color: #374151; }
     .status-pending { background: #f9fafb; color: #6b7280; }
     .status-reversed { background: #e0e7ff; color: #3730a3; }
+    .auto { font-size: 6px; font-weight: normal; }
 </style>
 </head>
 <body>
@@ -105,7 +106,8 @@
                         <td>{{ $student['first_name'] }}</td>
                         @foreach ($report['sessions'] as $session)
                             @php($status = $student['sessions'][$session['id']] ?? 'pending')
-                            <td class="status status-{{ $status }}">{{ ucfirst($status) }}</td>
+                            @php($isAuto = $status === 'present' && in_array($session['id'], $student['auto_sessions'] ?? [], true))
+                            <td class="status status-{{ $status }}">{{ ucfirst($status) }}@if ($isAuto)<br><span class="auto">Auto — staff</span>@endif</td>
                         @endforeach
                         <td class="right">{{ number_format($student['penalty_total'], 2) }}</td>
                     </tr>

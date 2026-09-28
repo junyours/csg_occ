@@ -68,7 +68,7 @@ function streakRecord(Student $student, AttendanceSession $session, string $stat
         'session_id' => $session->id,
         'student_id' => $student->id,
         'scanned_by' => $scanner?->id,
-        'scanned_at' => $status === 'absent' ? null : ($scannedAt ?? now()),
+        'scanned_at' => $status === 'missed' ? null : ($scannedAt ?? now()),
         'status' => $status,
     ]);
 }
@@ -100,7 +100,7 @@ it('does not break the streak on an excluded session, and does not add to it eit
 
     streakRecord($student, streakSession($event, '2026-08-01'), 'present');
     // Frozen in as `excluded` the way EndSession would leave it — neither
-    // a present nor an absent outcome.
+    // a present nor an missed outcome.
     streakRecord($student, streakSession($event, '2026-08-02'), 'excluded');
     streakRecord($student, streakSession($event, '2026-08-03'), 'present');
 
@@ -113,7 +113,7 @@ it('does not break the streak on an excluded session, and does not add to it eit
         ->and($streak['longest'])->toBe(2);
 });
 
-it('resets the streak to zero on an absent or late session, still across events', function () {
+it('resets the streak to zero on an missed or late session, still across events', function () {
     $officer = streakOfficer();
     $student = streakStudent('2023100003');
 
@@ -122,13 +122,13 @@ it('resets the streak to zero on an absent or late session, still across events'
     streakRecord($student, streakSession($eventOne, '2026-08-02'), 'present');
 
     $eventTwo = EventModel::create(['name' => 'Intramurals', 'created_by' => $officer->id]);
-    streakRecord($student, streakSession($eventTwo, '2026-08-10'), 'absent');
+    streakRecord($student, streakSession($eventTwo, '2026-08-10'), 'missed');
     streakRecord($student, streakSession($eventTwo, '2026-08-11'), 'present');
 
     $streak = (new ComputeAttendanceStreaks)($student->id)->get($student->id);
 
     // Longest remembers the earlier 2-run; current only reflects the
-    // single Present session after the Absent that reset it.
+    // single Present session after the Missed that reset it.
     expect($streak['current'])->toBe(1)
         ->and($streak['longest'])->toBe(2);
 });

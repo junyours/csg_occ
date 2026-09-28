@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\DB;
 final class CreateSession
 {
     /**
-     * Status is deliberately absent from $data — every session is created
+     * Status is deliberately missed from $data — every session is created
      * `scheduled` (the migration default, spec §7) and only moves via the
      * scan/end lifecycle, never set directly at creation.
      *

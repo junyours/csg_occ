@@ -86,7 +86,7 @@ const WINDOW_STYLE: Record<string, { Icon: LucideIcon; tone: Tone }> = {
 
 /**
  * The scanner's three outcomes, mapped onto the app's status palette. Same
- * hues the dashboard uses for Present / Late / Absent — an officer scanning
+ * hues the dashboard uses for Present / Late / Missed — an officer scanning
  * a gate and an admin reading a report are looking at the same colors for
  * the same facts.
  */

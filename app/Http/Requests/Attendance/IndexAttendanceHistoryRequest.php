@@ -31,12 +31,14 @@ class IndexAttendanceHistoryRequest extends FormRequest
             'year_level' => ['nullable', 'string', 'max:20'],
             'section' => ['nullable', 'string', 'max:50'],
             'event_id' => ['nullable', 'integer', 'exists:events,id'],
-            'status' => ['nullable', 'string', Rule::in(['all', 'present', 'late', 'absent', 'excluded'])],
+            'status' => ['nullable', 'string', Rule::in(['all', 'present', 'late', 'missed', 'excluded'])],
             // Matches against student_number/last_name/first_name of
             // either the attendee or the scanning officer.
             'search' => ['nullable', 'string', 'max:255'],
             'sort' => ['nullable', 'string', Rule::in(['recent', 'name', 'course', 'year_level', 'section', 'major', 'event'])],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'semester_id' => ['nullable', 'integer', 'exists:semesters,id'],
+            'scope' => ['nullable', 'string', Rule::in(['all'])],
         ];
     }
 }

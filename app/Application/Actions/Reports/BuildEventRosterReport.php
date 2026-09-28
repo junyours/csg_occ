@@ -3,7 +3,8 @@
 namespace App\Application\Actions\Reports;
 
 use App\Domain\Enums\AttendanceStatus;
-use App\Domain\Enums\Role;
+use App\Domain\Support\CurrentSemester;
+use App\Domain\Support\ReportRoster;
 use App\Models\AttendancePenalty;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
@@ -23,7 +24,7 @@ final class BuildEventRosterReport
      * department -> year level -> section (the spec's own example,
      * "BSIT, 1st year, 1st section -> BSIT 1A"), one row per student
      * sorted a-z by last name, one column per session in the event
-     * showing that student's Present/Late/Absent/Excluded status, and
+     * showing that student's Present/Late/Missed/Excluded status, and
      * a running penalty total per student — the same building blocks
      * BuildSessionReport already uses per-session, just assembled
      * across every session in the event and bucketed into groups
@@ -75,17 +76,14 @@ final class BuildEventRosterReport
         // reasoning as BuildSessionReport.
         $includedDepartmentIds = $event->includedDepartmentIds();
 
-        $roster = Student::where('role', Role::Student)
-            ->whereIn('department_id', $includedDepartmentIds)
-            ->when($departmentId, fn ($q) => $q->where('department_id', $departmentId))
-            ->when(filled($major), fn ($q) => $q->where('major', $major))
-            ->when(filled($yearLevel), fn ($q) => $q->where('year_level', $yearLevel))
-            ->when(filled($section), fn ($q) => $q->where('section', $section))
-            ->with('department')
-            ->orderBy('last_name')->orderBy('first_name')
-            ->get();
-
         $sessionIds = $sessions->pluck('id');
+
+        // Current term: active-or-has-record, live grouping. Past term:
+        // record-driven, grouped by the per-record snapshot (ReportRoster).
+        $roster = CurrentSemester::usesLiveRoster($event->semester_id)
+            ? ReportRoster::live($sessionIds, $includedDepartmentIds, $departmentId, $major, $yearLevel, $section)
+            : ReportRoster::historical($sessionIds, $departmentId, $major, $yearLevel, $section);
+
         $rosterIds = $roster->pluck('id');
 
         $recordsBySession = AttendanceRecord::whereIn('session_id', $sessionIds)
@@ -110,7 +108,7 @@ final class BuildEventRosterReport
         );
 
         // A reversed penalty means the charge was forgiven, so the roster
-        // must not keep reading "Absent" (or "Late") for that session —
+        // must not keep reading "Missed" (or "Late") for that session —
         // it reads "Reversed" instead, matching what the penalty column
         // already says by charging 0 for it.
         //
@@ -203,6 +201,7 @@ final class BuildEventRosterReport
                     $student, $sessions, $recordsBySession, $excludedBySession,
                     $reversedSessionIdsByStudent->get($student->id, collect()),
                 ),
+                'auto_sessions' => $this->autoSessionIdsFor($student, $sessions, $recordsBySession),
                 'penalty_total' => $penaltyTotals->get($student->id, 0.0),
             ])
             ->values()
@@ -223,7 +222,7 @@ final class BuildEventRosterReport
      * @param  Collection<int, Collection>  $recordsBySession
      * @param  Collection<int, array<int>>  $excludedBySession
      * @param  Collection<int, int>  $reversedSessionIds  Session ids (as keys)
-     *                                                    whose Late/Absent
+     *                                                    whose Late/Missed
      *                                                    penalty for this
      *                                                    student was reversed
      *                                                    and left nothing owed.
@@ -259,20 +258,45 @@ final class BuildEventRosterReport
                 // (§2 rule 4's "mid-window guard") — that outcome is
                 // never rewritten to "Excluded" after the fact.
                 //
-                // Reversed outranks the stored Absent/Late: the record is
+                // Reversed outranks the stored Missed/Late: the record is
                 // still historically accurate, but the roster is a
                 // penalty-facing document and the charge was undone.
                 $record !== null && $reversedSessionIds->has($session->id) => 'reversed',
                 $record !== null => $record->status->value,
-                // Spec §8: excluded reads as "Excluded", never "Absent".
+                // Spec §8: excluded reads as "Excluded", never "Missed".
                 $isExcluded => 'excluded',
                 // Not yet scanned and the session may still be open — only
-                // EndSession is allowed to decide Absent, so this stays
+                // EndSession is allowed to decide Missed, so this stays
                 // null (rendered as "Pending") rather than guessed at.
                 default => null,
             };
         }
 
         return $statuses;
+    }
+
+    /**
+     * Ids of the sessions where this person's Present was written by
+     * EndSession's staff auto-Present (no scan, no scanner) — lets the
+     * exports label those cells "Auto — staff". `sessions` itself is
+     * untouched so its status strings keep their meaning everywhere.
+     *
+     * @param  Collection<int, AttendanceSession>  $sessions
+     * @param  Collection<int, Collection>  $recordsBySession
+     * @return list<int>
+     */
+    private function autoSessionIdsFor(Student $student, Collection $sessions, Collection $recordsBySession): array
+    {
+        $ids = [];
+
+        foreach ($sessions as $session) {
+            $record = $recordsBySession->get($session->id, collect())->get($student->id);
+
+            if ($record !== null && $record->auto_present && $record->status === AttendanceStatus::Present) {
+                $ids[] = $session->id;
+            }
+        }
+
+        return $ids;
     }
 }

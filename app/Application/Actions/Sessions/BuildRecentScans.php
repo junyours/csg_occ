@@ -33,7 +33,7 @@ final class BuildRecentScans
      * gate now see one list instead of three private ones.
      *
      * Scoped to `whereNotNull('scanned_at')` so it only ever shows real
-     * scans. The Absent rows EndSession backfills are records too, but
+     * scans. The Missed rows EndSession backfills are records too, but
      * nobody scanned them and they'd otherwise flood the list the
      * instant a session closed.
      *

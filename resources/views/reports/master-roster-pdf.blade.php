@@ -25,6 +25,9 @@
     .event-0 { background: #C6EFCE; color: #006100; }
     .event-1 { background: #FFEB9C; color: #9C6500; }
     .event-2 { background: #FFC7CE; color: #9C0006; }
+    /* Only drawn when the report spans semesters — a neutral slate band
+       above the coloured event blocks. */
+    th.semester-header { background: #CBD5E1; color: #0F172A; text-align: center; font-size: 11px; }
     .group { page-break-after: always; }
     .group:last-child { page-break-after: auto; }
     .total-row td { font-weight: bold; background: #f1f5f9; border-top: 2px solid #4F81BD; }
@@ -33,10 +36,11 @@
     .status { text-align: center; border-radius: 2px; }
     .status-present { background: #d1fae5; color: #065f46; font-weight: bold; }
     .status-late { background: #fef3c7; color: #92400e; }
-    .status-absent { background: #fee2e2; color: #991b1b; }
+    .status-missed { background: #fee2e2; color: #991b1b; }
     .status-excluded { background: #f3f4f6; color: #374151; }
     .status-pending { background: #f9fafb; color: #6b7280; }
     .status-reversed { background: #e0e7ff; color: #3730a3; }
+    .auto { font-size: 6px; font-weight: normal; }
 </style>
 </head>
 <body>
@@ -47,6 +51,15 @@
     // is padded with empty placeholder groups.
     $eventColumns = \App\Domain\Support\RosterReportColumnGrouper::groupByEventDayAndWindow($report['sessions']);
     $eventNames = implode(', ', array_column($report['events'], 'name'));
+
+    // A selection that spans semesters gets one more header row: each
+    // semester merged across its events' columns. Single-semester
+    // reports have none, so their layout is unchanged.
+    $semesterColumns = (($report['spans_semesters'] ?? false) && count($eventColumns) > 0)
+        ? \App\Domain\Support\RosterReportColumnGrouper::groupBySemester($eventColumns, $report['semesters'] ?? [])
+        : [];
+    $hasSemesterRow = count($semesterColumns) > 0;
+    $headerRows = $hasSemesterRow ? 5 : 4;
 @endphp
 @forelse ($report['groups'] as $group)
     <div class="group">
@@ -63,15 +76,28 @@
             <thead>
                 @if (count($eventColumns) > 0)
                     <tr>
-                        <th class="idx static-header" rowspan="4">#</th>
-                        <th class="static-header" rowspan="4">Student No.</th>
-                        <th class="static-header" rowspan="4">Last Name</th>
-                        <th class="static-header" rowspan="4">First Name</th>
-                        @foreach ($eventColumns as $eventColumn)
-                            <th class="event-header event-{{ $loop->index % 3 }}" colspan="{{ $eventColumn['span'] }}">{{ $eventColumn['event_name'] }}</th>
-                        @endforeach
-                        <th class="right penalty-header" rowspan="4">Penalty Total</th>
+                        <th class="idx static-header" rowspan="{{ $headerRows }}">#</th>
+                        <th class="static-header" rowspan="{{ $headerRows }}">Student No.</th>
+                        <th class="static-header" rowspan="{{ $headerRows }}">Last Name</th>
+                        <th class="static-header" rowspan="{{ $headerRows }}">First Name</th>
+                        @if ($hasSemesterRow)
+                            @foreach ($semesterColumns as $semesterColumn)
+                                <th class="semester-header" colspan="{{ $semesterColumn['span'] }}">{{ $semesterColumn['label'] }}</th>
+                            @endforeach
+                        @else
+                            @foreach ($eventColumns as $eventColumn)
+                                <th class="event-header event-{{ $loop->index % 3 }}" colspan="{{ $eventColumn['span'] }}">{{ $eventColumn['event_name'] }}</th>
+                            @endforeach
+                        @endif
+                        <th class="right penalty-header" rowspan="{{ $headerRows }}">Penalty Total</th>
                     </tr>
+                    @if ($hasSemesterRow)
+                        <tr>
+                            @foreach ($eventColumns as $eventColumn)
+                                <th class="event-header event-{{ $loop->index % 3 }}" colspan="{{ $eventColumn['span'] }}">{{ $eventColumn['event_name'] }}</th>
+                            @endforeach
+                        </tr>
+                    @endif
                     <tr>
                         @foreach ($eventColumns as $eventColumn)
                             @foreach ($eventColumn['days'] as $day)
@@ -118,7 +144,8 @@
                         <td>{{ $student['first_name'] }}</td>
                         @foreach ($report['sessions'] as $session)
                             @php($status = $student['sessions'][$session['id']] ?? 'pending')
-                            <td class="status status-{{ $status }}">{{ ucfirst($status) }}</td>
+                            @php($isAuto = $status === 'present' && in_array($session['id'], $student['auto_sessions'] ?? [], true))
+                            <td class="status status-{{ $status }}">{{ ucfirst($status) }}@if ($isAuto)<br><span class="auto">Auto — staff</span>@endif</td>
                         @endforeach
                         <td class="right">{{ number_format($student['penalty_total'], 2) }}</td>
                     </tr>

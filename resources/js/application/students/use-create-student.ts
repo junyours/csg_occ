@@ -8,7 +8,8 @@ export function useCreateStudent() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (payload: CreateStudentPayload) => httpStudentsRepository.create(payload),
+        mutationFn: ({ payload, updateExisting }: { payload: CreateStudentPayload; updateExisting?: boolean }) =>
+            httpStudentsRepository.create(payload, { updateExisting }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: STUDENTS_QUERY_KEY });
         },

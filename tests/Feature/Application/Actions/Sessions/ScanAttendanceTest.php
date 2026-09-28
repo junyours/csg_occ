@@ -7,9 +7,12 @@ use App\Domain\Enums\ExclusionScope;
 use App\Domain\Enums\SessionStatus;
 use App\Domain\Enums\WindowType;
 use App\Domain\Exceptions\SessionNotAcceptingScansException;
+use App\Domain\Exceptions\SessionScanTooEarlyException;
 use App\Domain\Exceptions\StaleQrCodeException;
 use App\Domain\Exceptions\StudentDepartmentNotIncludedException;
 use App\Domain\Exceptions\StudentExcludedException;
+use App\Domain\Exceptions\StudentInactiveException;
+use App\Domain\Exceptions\StudentNotEligibleForAttendanceException;
 use App\Domain\ValueObjects\QrPayload;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
@@ -144,6 +147,39 @@ it('rejects a scan when the session is not ongoing', function () {
 
     (new ScanAttendance)($session, $token);
 })->throws(SessionNotAcceptingScansException::class);
+
+// Belt-and-suspenders (SessionScanTooEarlyException): StartSession already
+// refuses to move a session to Ongoing before its scheduled start time, so
+// this situation shouldn't arise through normal use — but ScanAttendance
+// checks the server clock again anyway, independently, so a scan can never
+// be recorded ahead of a session's own window under any circumstance,
+// including a scanning device's clock being wound back (which has no
+// bearing here: Carbon::now() below is this test's frozen *server* clock,
+// never anything the scanning device would report).
+it('rejects a scan against an ongoing session before its scheduled start time', function () {
+    // Ongoing despite start_time being in the future relative to "now" —
+    // only reachable today via direct model state (e.g. a manual DB edit
+    // or a bug), exactly the scenario this second, independent check
+    // exists for.
+    $session = makeSession(['status' => SessionStatus::Ongoing, 'start_time' => '09:00:00', 'end_time' => '10:00:00']);
+    $student = makeStudent();
+    $token = QrPayload::forStudent($student->student_number, $student->qr_version)->encrypt();
+
+    // Frozen "now" (07:05, from beforeEach) is well before the session's
+    // 09:00 start.
+    (new ScanAttendance)($session, $token);
+})->throws(SessionScanTooEarlyException::class);
+
+it('allows a scan against an ongoing session once its scheduled start time arrives', function () {
+    $session = makeSession(['status' => SessionStatus::Ongoing, 'start_time' => '07:00:00', 'end_time' => '08:00:00']);
+    $student = makeStudent();
+    $token = QrPayload::forStudent($student->student_number, $student->qr_version)->encrypt();
+
+    // beforeEach freezes "now" at 07:05 — after this session's 07:00 start.
+    $record = (new ScanAttendance)($session, $token);
+
+    expect($record->status)->toBe(AttendanceStatus::Present);
+});
 
 it('classifies a scan outside the grace window as Late', function () {
     $session = makeSession();
@@ -302,4 +338,67 @@ it('allows a scan from any department when the event has no department restricti
     $record = (new ScanAttendance)($session, $token);
 
     expect($record->status)->toBe(AttendanceStatus::Present);
+});
+
+it('rejects a scan from an inactive student, writing nothing', function () {
+    $session = makeSession();
+    $student = makeStudent();
+    $student->update(['status' => 'inactive']);
+    $token = QrPayload::forStudent($student->student_number, $student->qr_version)->encrypt();
+
+    try {
+        (new ScanAttendance)($session, $token);
+        $this->fail('Expected StudentInactiveException.');
+    } catch (StudentInactiveException) {
+        expect(AttendanceRecord::count())->toBe(0);
+    }
+});
+
+it('still returns the existing record when a student was deactivated after scanning', function () {
+    $session = makeSession();
+    $student = makeStudent();
+    $token = QrPayload::forStudent($student->student_number, $student->qr_version)->encrypt();
+
+    $first = (new ScanAttendance)($session, $token);
+    $student->update(['status' => 'inactive']);
+
+    expect((new ScanAttendance)($session, $token)->id)->toBe($first->id)
+        ->and(AttendanceRecord::count())->toBe(1);
+});
+
+it('refuses a staff account with a message saying attendance is automatic', function () {
+    $session = makeSession();
+    $student = makeStudent();
+    $student->update(['role' => 'officer']);
+    $token = QrPayload::forStudent($student->student_number, $student->qr_version)->encrypt();
+
+    expect(fn () => (new ScanAttendance)($session, $token))
+        ->toThrow(StudentNotEligibleForAttendanceException::class, 'recorded automatically');
+});
+
+it('refuses a System Admin with its own message', function () {
+    $session = makeSession();
+    $student = makeStudent();
+    $student->update(['role' => 'system_admin']);
+    $token = QrPayload::forStudent($student->student_number, $student->qr_version)->encrypt();
+
+    expect(fn () => (new ScanAttendance)($session, $token))
+        ->toThrow(StudentNotEligibleForAttendanceException::class, 'System Admin');
+});
+
+it('freezes the enrollment snapshot onto the record', function () {
+    $session = makeSession();
+    $student = makeStudent();
+    $student->update(['major' => 'FM', 'section' => '2A', 'year_level' => '2']);
+    $token = QrPayload::forStudent($student->student_number, $student->qr_version)->encrypt();
+
+    $record = (new ScanAttendance)($session, $token);
+    $student->update(['section' => '3B', 'year_level' => '3']);
+
+    expect($record->fresh())
+        ->department_id->toBe($student->department_id)
+        ->major->toBe('FM')
+        ->section->toBe('2A')
+        ->year_level->toBe('2')
+        ->auto_present->toBeFalse();
 });

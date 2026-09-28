@@ -33,7 +33,7 @@ const SESSION_STATUS_CONTENT: Record<SessionStatus, { label: string; tone: Tone 
 const ATTENDANCE_STATUS_CHIP: Partial<Record<AttendanceStatus, { label: string; tone: Tone }>> = {
     [AttendanceStatus.Present]: { label: 'You: Present', tone: 'emerald' },
     [AttendanceStatus.Late]: { label: 'You: Late', tone: 'amber' },
-    [AttendanceStatus.Absent]: { label: 'You: Absent', tone: 'red' },
+    [AttendanceStatus.Missed]: { label: 'You: Missed', tone: 'red' },
     [AttendanceStatus.Excluded]: { label: 'You: Excluded', tone: 'neutral' },
 };
 

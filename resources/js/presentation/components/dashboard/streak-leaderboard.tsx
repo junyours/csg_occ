@@ -18,7 +18,7 @@ const row: Variants = {
 /**
  * Gold / silver / bronze — a fixed, universally-read color language
  * (medals, podiums, trophies) rather than one of the dashboard's usual
- * TONE hues, since "1st place" isn't Present/Late/Absent or any of the
+ * TONE hues, since "1st place" isn't Present/Late/Missed or any of the
  * app's existing meanings.
  */
 const MEDAL_BADGE: Record<1 | 2 | 3, string> = {
@@ -70,17 +70,25 @@ function initialsFromName(name: string): string {
 }
 
 /**
- * Just the clock time (e.g. "1:05 PM"), in the viewer's local time —
- * latestScanAt is a genuine UTC instant, not a wall-clock string, so
- * unlike formatTimeOfDay this does convert timezones (same reasoning
- * formatScannedAt in lib/utils uses). No date attached: this sits next
- * to a leaderboard row, not a ledger entry, so only "how recently did
- * they scan" matters here, not which day.
+ * Just the clock time, down to the second (e.g. "1:05:03 PM"), in the
+ * viewer's local time — latestScanAt is a genuine UTC instant, not a
+ * wall-clock string, so unlike formatTimeOfDay this does convert
+ * timezones (same reasoning formatScannedAt in lib/utils uses). No date
+ * attached: this sits next to a leaderboard row, not a ledger entry, so
+ * only "how recently did they scan" matters here, not which day. Seconds
+ * are included (rather than the usual minute-only display elsewhere in
+ * the app) because streak ties are broken by scan speed server-side —
+ * two people who both scanned at "2:45 PM" may genuinely differ by
+ * seconds, and this is the one place that difference should be visible.
  */
 function formatScanTime(value: string | null): string | null {
     if (!value) return null;
 
-    return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(value));
+    return new Intl.DateTimeFormat('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+    }).format(new Date(value));
 }
 
 function StudentPhoto({ entry }: { entry: DashboardStreakLeaderboardEntry }) {

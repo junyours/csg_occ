@@ -18,7 +18,7 @@ function createSemesterTestAdmin(): Student
         'last_name' => 'Admin', 'first_name' => 'CSG',
         'department_id' => $department->id,
         'username' => 'csgadmin', 'password' => 'password',
-        'role' => 'csg_admin',
+        'role' => 'system_admin',
     ]);
 }
 
@@ -38,25 +38,14 @@ it('creates a semester owned by the given creator, scoped to the given academic 
         ->and($semester->created_by)->toBe($admin->id);
 });
 
-it('retires the previously active semester in the same academic year when creating a new active one', function () {
+it('always creates a semester inactive and never retires an active one', function () {
     $admin = createSemesterTestAdmin();
     $academicYear = AcademicYear::create(['name' => '2026-2027', 'created_by' => $admin->id]);
-    $current = (new CreateSemester)($academicYear, ['name' => 'semester_1', 'is_active' => true], $admin);
+    $current = Semester::create(['academic_year_id' => $academicYear->id, 'name' => 'semester_1', 'is_active' => true, 'created_by' => $admin->id]);
 
     $next = (new CreateSemester)($academicYear, ['name' => 'semester_2', 'is_active' => true], $admin);
 
-    expect($current->fresh()->is_active)->toBeFalse()
-        ->and($next->is_active)->toBeTrue()
-        ->and(Semester::forAcademicYear($academicYear->id)->where('is_active', true)->count())->toBe(1);
-});
-
-it('does not retire an active semester in a different academic year', function () {
-    $admin = createSemesterTestAdmin();
-    $yearOne = AcademicYear::create(['name' => '2025-2026', 'created_by' => $admin->id]);
-    $yearTwo = AcademicYear::create(['name' => '2026-2027', 'created_by' => $admin->id]);
-    $otherYearActive = (new CreateSemester)($yearOne, ['name' => 'semester_1', 'is_active' => true], $admin);
-
-    (new CreateSemester)($yearTwo, ['name' => 'semester_1', 'is_active' => true], $admin);
-
-    expect($otherYearActive->fresh()->is_active)->toBeTrue();
+    expect($next->is_active)->toBeFalse()
+        ->and($current->fresh()->is_active)->toBeTrue()
+        ->and(Semester::where('is_active', true)->count())->toBe(1);
 });

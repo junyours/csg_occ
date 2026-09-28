@@ -123,8 +123,8 @@ it('returns no events when the active academic year has no active semester', fun
         ->assertJsonPath('academic_year.name', '2026-2027');
 });
 
-it('lists only events in the active academic year + semester, with aggregated present/late/absent/excluded totals', function () {
-    $admin = masterReportApiStaff('csg_admin', '2020100004');
+it('lists only events in the active academic year + semester, with aggregated present/late/missed/excluded totals', function () {
+    $admin = masterReportApiStaff('system_admin', '2020100004');
     $semester = masterReportApiActiveSemester($admin->id);
     $inactiveSemester = Semester::create([
         'academic_year_id' => $semester->academic_year_id, 'name' => 'semester_2',
@@ -138,7 +138,7 @@ it('lists only events in the active academic year + semester, with aggregated pr
 
     $present = masterReportApiStudent('2023100001');
     $late = masterReportApiStudent('2023100002');
-    $absent = masterReportApiStudent('2023100003');
+    $missed = masterReportApiStudent('2023100003');
     $excluded = masterReportApiStudent('2023100004');
 
     Exclusion::create([
@@ -153,8 +153,8 @@ it('lists only events in the active academic year + semester, with aggregated pr
             'status' => AttendanceStatus::Present,
         ]);
         AttendanceRecord::create([
-            'session_id' => $session->id, 'student_id' => $absent->id,
-            'status' => AttendanceStatus::Absent,
+            'session_id' => $session->id, 'student_id' => $missed->id,
+            'status' => AttendanceStatus::Missed,
         ]);
     }
     // Late only on the first session — present on the second.
@@ -180,7 +180,7 @@ it('lists only events in the active academic year + semester, with aggregated pr
         ->and($events[0]['id'])->toBe($event->id)
         ->and($events[0]['present'])->toBe(3) // present twice + the second late-student session
         ->and($events[0]['late'])->toBe(1)
-        ->and($events[0]['absent'])->toBe(2)
+        ->and($events[0]['missed'])->toBe(2)
         ->and($events[0]['excluded'])->toBe(2); // once per session
 });
 

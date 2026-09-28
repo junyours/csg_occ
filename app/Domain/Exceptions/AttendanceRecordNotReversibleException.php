@@ -8,11 +8,11 @@ use RuntimeException;
 
 /**
  * A scan can only be undone while the session it belongs to is still
- * Ongoing. Once EndSession has run, the session's Absent sweep and its
+ * Ongoing. Once EndSession has run, the session's Missed sweep and its
  * penalty ledger writes have already happened (see EndSession), so
  * deleting a record afterwards would leave that student with *no* row at
- * all for the session — neither Present nor Absent — silently dropping
- * them out of every report and out of the absent penalty they'd otherwise
+ * all for the session — neither Present nor Missed — silently dropping
+ * them out of every report and out of the missed penalty they'd otherwise
  * have been charged. Reversal is therefore a live, at-the-gate correction
  * only; anything after the fact is a CSG Admin penalty reversal instead
  * (spec §7.3, see ReversePenalty).

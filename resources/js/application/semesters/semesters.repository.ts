@@ -4,7 +4,6 @@ export interface CreateSemesterPayload {
     name: string;
     start_date?: string | null;
     end_date?: string | null;
-    is_active?: boolean;
 }
 
 /**

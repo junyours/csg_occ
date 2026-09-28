@@ -2,6 +2,8 @@
 
 namespace App\Application\Actions\Events;
 
+use App\Domain\Support\CurrentSemester;
+use App\Domain\Support\SemesterScope;
 use App\Models\EventModel;
 use App\Models\Student;
 
@@ -16,7 +18,7 @@ final class BuildMyAttendanceHistory
      * row per session — the "history" counterpart to
      * BuildMyEventAttendance, which stays nested under one event for the
      * event-detail screen. Reuses that same action per event rather than
-     * re-deriving the Present/Late/Absent/Excluded/pending reasoning, so
+     * re-deriving the Present/Late/Missed/Excluded/pending reasoning, so
      * the two screens can never drift apart on what a given session
      * reports.
      *
@@ -30,11 +32,14 @@ final class BuildMyAttendanceHistory
      *     session_id: int, window_type: string, check_type: string,
      *     start_time: string, end_time: string, session_status: string,
      *     attendance_status: ?string, scanned_at: ?string, scanned_by_name: ?string,
+     *     auto_present: bool,
      * }>
      */
     public function __invoke(Student $student): array
     {
-        return EventModel::orderByDesc('id')
+        // Current semester's events only (legacy semester-less events stay).
+        return SemesterScope::events(EventModel::query(), CurrentSemester::id(), 'events.semester_id')
+            ->orderByDesc('id')
             ->get()
             ->flatMap(function (EventModel $event) use ($student) {
                 $attendance = ($this->buildMyEventAttendance)($event, $student);
@@ -56,6 +61,7 @@ final class BuildMyAttendanceHistory
                         'attendance_status' => $session['attendance_status'],
                         'scanned_at' => $session['scanned_at'],
                         'scanned_by_name' => $session['scanned_by_name'],
+                        'auto_present' => $session['auto_present'],
                     ]),
                 );
             })

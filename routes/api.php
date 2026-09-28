@@ -4,6 +4,7 @@ use App\Http\Controllers\AcademicYears\AcademicYearController;
 use App\Http\Controllers\Attendance\AttendanceHistoryController;
 use App\Http\Controllers\Attendance\AttendanceHistoryFilterOptionsController;
 use App\Http\Controllers\Auth\AuthController;
+use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Dashboard\DashboardController;
 use App\Http\Controllers\Departments\DepartmentController;
 use App\Http\Controllers\Departments\DepartmentLogoController;
@@ -17,6 +18,7 @@ use App\Http\Controllers\Events\RescheduleEventDaysController;
 use App\Http\Controllers\Exclusions\ExclusionBulkImportController;
 use App\Http\Controllers\Exclusions\ExclusionBulkImportPreviewController;
 use App\Http\Controllers\Exclusions\ExclusionController;
+use App\Http\Controllers\PasswordResetCodes\PasswordResetCodeController;
 use App\Http\Controllers\Penalties\MyPenaltyHistoryController;
 use App\Http\Controllers\Penalties\PenaltyController;
 use App\Http\Controllers\Penalties\ReversePenaltyController;
@@ -24,6 +26,7 @@ use App\Http\Controllers\Reports\MasterReportController;
 use App\Http\Controllers\Reports\MasterReportGenerationController;
 use App\Http\Controllers\Reports\RosterReportGenerationController;
 use App\Http\Controllers\Semesters\SemesterController;
+use App\Http\Controllers\ServerTime\ServerTimeController;
 use App\Http\Controllers\Sessions\EndSessionController;
 use App\Http\Controllers\Sessions\RecentScansController;
 use App\Http\Controllers\Sessions\ReverseScanController;
@@ -38,12 +41,27 @@ use App\Http\Controllers\Students\StudentBulkImportTemplateController;
 use App\Http\Controllers\Students\StudentController;
 use App\Http\Controllers\Students\StudentPhotoController;
 use App\Http\Controllers\Students\StudentQrController;
+use App\Http\Controllers\Students\StudentPasswordResetController;
 use App\Http\Controllers\Students\StudentRoleController;
+use App\Http\Controllers\Students\StudentStatusController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:login');
 
-Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
+// Signed-out "forgot password" flow (see ForgotPasswordController). Nothing is
+// emailed or texted: the student asks for a code here, an SC/CSG/System admin
+// reads it off the Password Reset Codes screen below and tells them in person.
+// Each call is throttled like login is — per IP + Student ID, 5 a minute — and
+// on top of that a code burns itself after 5 wrong guesses regardless of which
+// IP they came from (see VerifyPasswordResetCode).
+Route::post('/auth/forgot-password', [ForgotPasswordController::class, 'requestCode'])
+    ->middleware('throttle:password-reset-request');
+Route::post('/auth/forgot-password/verify', [ForgotPasswordController::class, 'verifyCode'])
+    ->middleware('throttle:password-reset-attempt');
+Route::post('/auth/forgot-password/reset', [ForgotPasswordController::class, 'resetPassword'])
+    ->middleware('throttle:password-reset-attempt');
+
+Route::middleware(['auth:sanctum', 'account.active', 'throttle:api'])->group(function () {
     // Reachable even while must_change_password is still true — otherwise a
     // student stuck on their default password could never clear the gate,
     // or log out, from the API alone.
@@ -51,6 +69,12 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
     Route::post('/auth/accept-terms', [AuthController::class, 'acceptTerms']);
     Route::get('/auth/me', [AuthController::class, 'me']);
+
+    // See ServerTimeController's docblock — no other middleware needed
+    // (and deliberately none of password.changed/photo.uploaded's gates,
+    // since a client should be able to sync its clock as soon as it's
+    // logged in, before anything else).
+    Route::get('/server-time', [ServerTimeController::class, 'show']);
 
     Route::middleware('password.changed')->group(function () {
         // Reachable even while the photo gate below is still open —
@@ -137,6 +161,14 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
             // so this is a single PATCH rather than a toggle.
             Route::patch('/penalties/{penalty}/reverse', [ReversePenaltyController::class, 'update']);
 
+            // The codes an admin reads out to students who forgot their
+            // password. Scoped by role rank + department — see
+            // PasswordResetCode::scopeVisibleTo. The GET is read-only and
+            // is only called when the screen opens or Refresh is pressed;
+            // the DELETE is the "Clear used & expired" button.
+            Route::get('/password-reset-codes', [PasswordResetCodeController::class, 'index']);
+            Route::delete('/password-reset-codes', [PasswordResetCodeController::class, 'destroy']);
+
             Route::get('/academic-years', [AcademicYearController::class, 'index']);
             Route::post('/academic-years', [AcademicYearController::class, 'store']);
             Route::patch('/academic-years/{academicYear}', [AcademicYearController::class, 'update']);
@@ -161,6 +193,11 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
             Route::post('/students/bulk-import/preview', [StudentBulkImportPreviewController::class, 'store']);
             Route::post('/students/bulk-import', [StudentBulkImportController::class, 'store']);
             Route::patch('/students/{student}/role', [StudentRoleController::class, 'update']);
+            Route::patch('/students/{student}', [StudentController::class, 'update']);
+            Route::patch('/students/{student}/status', [StudentStatusController::class, 'update']);
+            // Admin puts a student's password back to the default and forces a
+            // change at next login — see ResetStudentPassword for the rules.
+            Route::post('/students/{student}/reset-password', [StudentPasswordResetController::class, 'store']);
             Route::get('/students/{student}/qr', [StudentQrController::class, 'show']);
 
             Route::get('/events', [EventController::class, 'index']);
@@ -210,7 +247,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
             // Settings → Reports landing screen: every event in the current
             // active academic year + semester with its total
-            // Present/Absent/Late/Excluded (see BuildMasterReport) —
+            // Present/Missed/Late/Excluded (see BuildMasterReport) —
             // distinct from the per-event roster report above.
             Route::get('/reports/master', [MasterReportController::class, 'show']);
 

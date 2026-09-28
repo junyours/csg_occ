@@ -17,10 +17,28 @@ export interface MyPenaltyEntry {
     checkType: CheckType;
 }
 
+/** One event's penalties inside a semester group, with its own subtotal. */
+export interface MyPenaltyEventGroup {
+    eventId: number;
+    eventName: string;
+    subtotal: number;
+}
+
+/** Penalties grouped semester -> event; semesters are never blended. */
+export interface MyPenaltySemesterGroup {
+    semesterId: number | null;
+    semesterName: string | null;
+    academicYearName: string | null;
+    isCurrent: boolean;
+    subtotal: number;
+    events: MyPenaltyEventGroup[];
+}
+
 export interface MyPenaltyHistory {
     /** Sum of every non-reversed amount — same rule as the dashboard's penaltyTotal. */
     total: number;
     entries: MyPenaltyEntry[];
+    groups: MyPenaltySemesterGroup[];
 }
 
 interface RawPenaltyEntry {
@@ -41,6 +59,14 @@ interface RawPenaltyEntry {
 interface RawPenaltyHistory {
     total: number;
     entries: RawPenaltyEntry[];
+    groups?: Array<{
+        semester_id: number | null;
+        semester_name: string | null;
+        academic_year_name: string | null;
+        is_current: boolean;
+        subtotal: number;
+        events: Array<{ event_id: number; event_name: string; subtotal: number }>;
+    }>;
 }
 
 function toPenaltyEntry(raw: RawPenaltyEntry): MyPenaltyEntry {
@@ -89,6 +115,8 @@ export interface PenaltyLedgerEntry {
     date: string;
     windowType: WindowType;
     checkType: CheckType;
+    /** Semester of the penalty's event; null for legacy rows. */
+    semesterId: number | null;
 }
 
 export interface PenaltyLedgerFilters {
@@ -96,6 +124,8 @@ export interface PenaltyLedgerFilters {
     eventId?: number;
     status?: 'all' | 'active' | 'reversed';
     search?: string;
+    /** null/omitted = current semester; a number = that semester; 'all' = every semester. */
+    semester?: number | 'all' | null;
     page?: number;
     perPage?: number;
 }
@@ -108,6 +138,19 @@ export interface PenaltyLedgerFilters {
  * always-excludes-reversed balance.
  */
 export interface PenaltyLedgerSummary {
+    total: number;
+    absentCount: number;
+    lateCount: number;
+    count: number;
+    /** Present only when listing "All semesters": one subtotal per semester, newest first. */
+    bySemester?: PenaltySemesterSubtotal[];
+}
+
+export interface PenaltySemesterSubtotal {
+    semesterId: number | null;
+    semesterName: string | null;
+    academicYearName: string | null;
+    isCurrent: boolean;
     total: number;
     absentCount: number;
     lateCount: number;
@@ -146,6 +189,7 @@ interface RawPenaltyLedgerEntry {
     date: string;
     window_type: string;
     check_type: string;
+    semester_id?: number | null;
 }
 
 interface RawPenaltyLedgerSummary {
@@ -153,6 +197,16 @@ interface RawPenaltyLedgerSummary {
     absentCount: number;
     lateCount: number;
     count: number;
+    bySemester?: Array<{
+        semester_id: number | null;
+        semester_name: string | null;
+        academic_year_name: string | null;
+        is_current: boolean;
+        total: number;
+        absentCount: number;
+        lateCount: number;
+        count: number;
+    }>;
 }
 
 interface RawPaginatedPenaltyLedger {
@@ -188,6 +242,7 @@ function toPenaltyLedgerEntry(raw: RawPenaltyLedgerEntry): PenaltyLedgerEntry {
         date: raw.date,
         windowType: raw.window_type as WindowType,
         checkType: raw.check_type as CheckType,
+        semesterId: raw.semester_id ?? null,
     };
 }
 
@@ -197,7 +252,22 @@ export const httpPenaltiesRepository = {
     // MyPenaltyHistoryController.
     async myHistory(): Promise<MyPenaltyHistory> {
         const { data } = await httpClient.get<RawPenaltyHistory>('/my-penalty-history');
-        return { total: data.total, entries: data.entries.map(toPenaltyEntry) };
+        return {
+            total: data.total,
+            entries: data.entries.map(toPenaltyEntry),
+            groups: (data.groups ?? []).map((group) => ({
+                semesterId: group.semester_id,
+                semesterName: group.semester_name,
+                academicYearName: group.academic_year_name,
+                isCurrent: group.is_current,
+                subtotal: group.subtotal,
+                events: group.events.map((event) => ({
+                    eventId: event.event_id,
+                    eventName: event.event_name,
+                    subtotal: event.subtotal,
+                })),
+            })),
+        };
     },
 
     // Admin ledger (CSG Admin / System Admin only — see
@@ -209,6 +279,8 @@ export const httpPenaltiesRepository = {
                 event_id: filters.eventId,
                 status: filters.status,
                 search: filters.search,
+                semester_id: typeof filters.semester === 'number' ? filters.semester : undefined,
+                scope: filters.semester === 'all' ? 'all' : undefined,
                 page: filters.page,
                 per_page: filters.perPage,
             },
@@ -220,10 +292,25 @@ export const httpPenaltiesRepository = {
             lastPage: data.last_page,
             total: data.total,
             perPage: data.per_page,
-            // Already camelCase on the wire (BuildPenaltySummary returns
-            // it that way directly, unlike the snake_case ledger rows
-            // above), so no field-by-field mapping needed here.
-            summary: data.summary,
+            // The totals are already camelCase on the wire (BuildPenaltySummary
+            // returns them that way, unlike the snake_case ledger rows above);
+            // only the per-semester rows carry snake_case identity fields.
+            summary: {
+                total: data.summary.total,
+                absentCount: data.summary.absentCount,
+                lateCount: data.summary.lateCount,
+                count: data.summary.count,
+                bySemester: data.summary.bySemester?.map((row) => ({
+                    semesterId: row.semester_id,
+                    semesterName: row.semester_name,
+                    academicYearName: row.academic_year_name,
+                    isCurrent: row.is_current,
+                    total: row.total,
+                    absentCount: row.absentCount,
+                    lateCount: row.lateCount,
+                    count: row.count,
+                })),
+            },
         };
     },
 

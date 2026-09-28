@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ChevronRight, Settings, UserPlus, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 import { Text } from '@/presentation/components/typography';
 import { UserAvatar } from '@/presentation/components/user-avatar';
@@ -111,6 +112,23 @@ export function AccountPickerView({ accounts, onSelect, onForget, onUseDifferent
                     />
                 ))}
             </div>
+
+            {/* The same "Forgot password?" link the sign-in form has — a
+                student who lands on this screen shouldn't have to guess
+                where it is. With exactly one saved account the Student ID
+                is handed over so it's already filled in; with several we
+                can't know which one they mean, so it opens blank. */}
+            {!managing.isManaging && (
+                <div className="flex justify-end">
+                    <Link
+                        to="/forgot-password"
+                        state={accounts.length === 1 ? { studentNumber: accounts[0].studentNumber } : undefined}
+                        className="text-small text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                    >
+                        Forgot password?
+                    </Link>
+                </div>
+            )}
 
             {/* Dashed rather than solid: this is the "none of the above" door,
                 and an outline button next to filled account cards was pulling

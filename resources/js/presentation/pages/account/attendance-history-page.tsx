@@ -13,6 +13,7 @@ import {
     AttendanceStatus,
     CHECK_TYPE_LABEL,
     Role,
+    semesterLabel,
     WINDOW_TYPE_LABEL,
 } from '@/domain/enums';
 import { cn, formatCurrency, formatDate, formatScannedAt, formatTimeOfDay } from '@/lib/utils';
@@ -34,7 +35,7 @@ const WINDOW_STYLE: Record<string, { Icon: LucideIcon; tone: Tone }> = {
 const STATUS_TONE: Record<string, Tone> = {
     [AttendanceStatus.Present]: 'emerald',
     [AttendanceStatus.Late]: 'amber',
-    [AttendanceStatus.Absent]: 'red',
+    [AttendanceStatus.Missed]: 'red',
     [AttendanceStatus.Excluded]: 'neutral',
     [AttendanceStatus.Pending]: 'neutral',
 };
@@ -141,7 +142,7 @@ export function AttendanceHistoryPage() {
         <div className="mx-auto max-w-2xl space-y-8">
             <div>
                 <Heading level="h1">Attendance & Penalties</Heading>
-                <Text variant="small">Your Present / Late / Absent record, with any penalty shown against the session it came from.</Text>
+                <Text variant="small">Your Present / Late / Missed record, with any penalty shown against the session it came from.</Text>
             </div>
 
             {isStudent && !isPenaltyLoading && penaltyHistory && (
@@ -149,6 +150,36 @@ export function AttendanceHistoryPage() {
                     total={isFiltered ? visiblePenaltyTotal : penaltyHistory.total}
                     label={isFiltered ? 'Penalty total for current filters' : 'Total penalty balance'}
                 />
+            )}
+
+            {isStudent && penaltyHistory && penaltyHistory.groups.some((group) => group.subtotal > 0) && (
+                <div className="space-y-3 rounded-2xl border border-border p-4">
+                    <Text variant="small" className="font-medium">
+                        Penalties by semester
+                    </Text>
+                    {penaltyHistory.groups
+                        .filter((group) => group.events.length > 0)
+                        .map((group) => (
+                            <div key={group.semesterId ?? 'none'} className="space-y-1">
+                                <div className="flex items-center justify-between gap-2">
+                                    <Text variant="small" className="font-medium">
+                                        {group.academicYearName ?? 'No semester'}
+                                        {group.semesterName ? ` — ${semesterLabel(group.semesterName)}` : ''}
+                                        {group.isCurrent ? ' (current)' : ''}
+                                    </Text>
+                                    <Text variant="small" className="font-medium">
+                                        {formatCurrency(group.subtotal)}
+                                    </Text>
+                                </div>
+                                {group.events.map((event) => (
+                                    <div key={event.eventId} className="flex items-center justify-between gap-2 pl-3">
+                                        <Text variant="caption">{event.eventName}</Text>
+                                        <Text variant="caption">{formatCurrency(event.subtotal)}</Text>
+                                    </div>
+                                ))}
+                            </div>
+                        ))}
+                </div>
             )}
 
             <div className="grid grid-cols-2 gap-4">
@@ -228,11 +259,17 @@ export function AttendanceHistoryPage() {
                                         {WINDOW_TYPE_LABEL[entry.windowType]} · {CHECK_TYPE_LABEL[entry.checkType]} ·{' '}
                                         {formatTimeOfDay(entry.startTime)}–{formatTimeOfDay(entry.endTime)}
                                     </Text>
-                                    {entry.scannedAt && (
+                                    {entry.autoPresent ? (
                                         <Text variant="caption" className="mt-2">
-                                            {formatScannedAt(entry.scannedAt)}
-                                            {entry.scannedByName ? ` · by ${entry.scannedByName}` : ''}
+                                            Auto — staff (recorded when the session ended)
                                         </Text>
+                                    ) : (
+                                        entry.scannedAt && (
+                                            <Text variant="caption" className="mt-2">
+                                                {formatScannedAt(entry.scannedAt)}
+                                                {entry.scannedByName ? ` · by ${entry.scannedByName}` : ''}
+                                            </Text>
+                                        )
                                     )}
                                 </div>
                             </div>

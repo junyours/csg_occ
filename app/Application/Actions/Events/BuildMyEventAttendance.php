@@ -18,14 +18,14 @@ final class BuildMyEventAttendance
     /**
      * One student's own attendance across every session of an event —
      * the read-only, single-caller counterpart to BuildEventRosterReport.
-     * Same Present/Late/Absent/Excluded reasoning, just scoped to one
+     * Same Present/Late/Missed/Excluded reasoning, just scoped to one
      * student instead of the whole roster:
      *
      *  - A session the caller hasn't been checked against yet (no
      *    AttendanceRecord row) reports attendance_status = null. That
      *    covers both "session hasn't started" and "session is ongoing
      *    and I haven't scanned yet" — EndSession is what turns a missing
-     *    record into a real Absent, so null before that point just
+     *    record into a real Missed, so null before that point just
      *    means "no verdict yet," never a guess.
      *  - Excluded students never get a real record for that session at
      *    all (see Exclusion::excludedStudentIdsForSession / EndSession's
@@ -102,11 +102,15 @@ final class BuildMyEventAttendance
                                 ?? ($isExcluded ? AttendanceStatus::Excluded->value : null),
                             'scanned_at' => $record?->scanned_at?->toIso8601String(),
                             // "Who scanned me" — no scan exists for an
-                            // Absent/Excluded/pending row, so this stays
+                            // Missed/Excluded/pending row, so this stays
                             // null rather than guessing.
                             'scanned_by_name' => $record?->scannedBy
                                 ? trim("{$record->scannedBy->first_name} {$record->scannedBy->last_name}")
                                 : null,
+                            // Staff Present written by EndSession (no scan,
+                            // synthetic scan time) - lets the screens say
+                            // "Auto — staff" instead of implying a scan.
+                            'auto_present' => (bool) $record?->auto_present,
                         ];
                     })
                     ->all(),

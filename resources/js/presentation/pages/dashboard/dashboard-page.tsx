@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, type Variants } from 'framer-motion';
 import {
@@ -36,9 +36,10 @@ import type {
     OfficerDashboardSummary,
     StudentDashboardSummary,
 } from '@/infrastructure/dashboard/dashboard.repository.http';
-import { AttendanceStatus, CHECK_TYPE_LABEL, Role, WINDOW_TYPE_LABEL } from '@/domain/enums';
+import { AttendanceStatus, CHECK_TYPE_LABEL, Role, semesterLabel, WINDOW_TYPE_LABEL } from '@/domain/enums';
 import { cn, formatCurrency, formatDate, formatTimeOfDay } from '@/lib/utils';
 import { Heading, Text } from '@/presentation/components/typography';
+import { SemesterPicker, type SemesterSelection } from '@/presentation/components/semester-picker';
 import { AnimatedCounter } from '@/presentation/components/dashboard/animated-counter';
 import { MyAttendanceStreak } from '@/presentation/components/dashboard/attendance-streak';
 import { StreakLeaderboard } from '@/presentation/components/dashboard/streak-leaderboard';
@@ -68,9 +69,16 @@ const item: Variants = {
 
 export function DashboardPage() {
     const student = useAuthStore((state) => state.student);
-    const { data, isLoading, isError } = useDashboard();
+    // Admins may look back at a past semester or "All" (grouped by semester);
+    // students/officers are always on the current one, server-side.
+    const [semesterSelection, setSemesterSelection] = useState<SemesterSelection>('current');
+    const { data, isLoading, isError } = useDashboard(
+        semesterSelection === 'current' ? null : semesterSelection,
+    );
 
     if (!student) return null;
+
+    const canPickSemester = [Role.SystemAdmin, Role.CsgAdmin, Role.ScAdmin].includes(student.role);
 
     return (
         // Every gap on this page is a multiple of 8 (see spacing.ts): 32px
@@ -81,6 +89,30 @@ export function DashboardPage() {
                 <Heading level="h1">Dashboard</Heading>
                 <Text variant="small">{subtitleFor(data)}</Text>
             </div>
+
+            {canPickSemester && <SemesterPicker value={semesterSelection} onChange={setSemesterSelection} allowAll />}
+
+            {data && !isOfficerSummary(data) && !isStudentSummary(data) && data.allSemesters && data.bySemester.length > 0 && (
+                <Card className={cn('border', CARD.root)}>
+                    <CardContent className={cn(CARD.inset, 'space-y-2')}>
+                        <Text variant="small" className="font-medium">
+                            By semester
+                        </Text>
+                        {data.bySemester.map((row) => (
+                            <div key={row.semesterId} className="flex items-center justify-between gap-2">
+                                <Text variant="small">
+                                    {row.academicYearName} — {semesterLabel(row.semesterName)}
+                                    {row.isCurrent ? ' (current)' : ''}
+                                </Text>
+                                <Text variant="caption">
+                                    {row.present} present · {row.late} late · {row.missed} missed ·{' '}
+                                    {formatCurrency(row.penaltyTotal)}
+                                </Text>
+                            </div>
+                        ))}
+                    </CardContent>
+                </Card>
+            )}
 
             {isLoading && <DashboardSkeleton />}
 
@@ -192,8 +224,8 @@ function minutesRemaining(endTime: string): number | null {
 /* ---------------------------------------------------------------------- */
 
 function StudentDashboard({ summary }: { summary: StudentDashboardSummary }) {
-    const { present, late, absent, excluded } = summary.totals;
-    const tracked = present + late + absent;
+    const { present, late, missed, excluded } = summary.totals;
+    const tracked = present + late + missed;
     const rate = tracked > 0 ? Math.round(((present + late) / tracked) * 100) : null;
     const tier = attendanceTier(rate);
 
@@ -206,7 +238,7 @@ function StudentDashboard({ summary }: { summary: StudentDashboardSummary }) {
     const stats: { status: AttendanceStatus; value: number; Icon: LucideIcon; tone: Tone }[] = [
         { status: AttendanceStatus.Present, value: present, Icon: CheckCircle2, tone: 'emerald' },
         { status: AttendanceStatus.Late, value: late, Icon: Clock, tone: 'amber' },
-        { status: AttendanceStatus.Absent, value: absent, Icon: XCircle, tone: 'red' },
+        { status: AttendanceStatus.Missed, value: missed, Icon: XCircle, tone: 'red' },
         { status: AttendanceStatus.Excluded, value: excluded, Icon: MinusCircle, tone: 'neutral' },
     ];
 
@@ -227,7 +259,7 @@ function StudentDashboard({ summary }: { summary: StudentDashboardSummary }) {
                             ? [
                                   { value: present, tone: 'emerald' },
                                   { value: late, tone: 'amber' },
-                                  { value: absent, tone: 'red' },
+                                  { value: missed, tone: 'red' },
                               ]
                             : undefined
                     }
@@ -346,7 +378,7 @@ function OfficerDashboard({ summary }: { summary: OfficerDashboardSummary }) {
 const PENALTY_VIEW_ROLES: Role[] = [Role.SystemAdmin, Role.CsgAdmin];
 
 function AdminDashboard({ summary, role }: { summary: Extract<DashboardSummary, { scope: 'global' | 'department' }>; role: Role }) {
-    const { present, late, absent } = summary.overallAttendanceCounts;
+    const { present, late, missed } = summary.overallAttendanceCounts;
     const { activeEvents, isLoading: isActiveEventsLoading } = useActiveEvents();
 
     const penaltyEntries: LeaderboardEntry[] = summary.penaltyByEvent.map((row) => ({
@@ -398,11 +430,11 @@ function AdminDashboard({ summary, role }: { summary: Extract<DashboardSummary, 
                                 segments={[
                                     { value: present, className: TONE.emerald.stroke },
                                     { value: late, className: TONE.amber.stroke },
-                                    { value: absent, className: TONE.red.stroke },
+                                    { value: missed, className: TONE.red.stroke },
                                 ]}
                             >
                                 <span className="text-h2 font-semibold tabular-nums text-foreground">
-                                    <AnimatedCounter value={present + late + absent} />
+                                    <AnimatedCounter value={present + late + missed} />
                                 </span>
                                 <span className="text-caption text-muted-foreground">tracked</span>
                             </SegmentedRing>
@@ -410,7 +442,7 @@ function AdminDashboard({ summary, role }: { summary: Extract<DashboardSummary, 
                             <div className={cn('grid w-full sm:w-auto sm:min-w-56', GAP.grid)}>
                                 <StatTile label="Present" value={present} Icon={CheckCircle2} tone="emerald" variant="solid" />
                                 <StatTile label="Late" value={late} Icon={Clock} tone="amber" />
-                                <StatTile label="Absent" value={absent} Icon={XCircle} tone="red" />
+                                <StatTile label="Missed" value={missed} Icon={XCircle} tone="red" />
                             </div>
                         </div>
                     </CardContent>
@@ -466,11 +498,11 @@ function SectionLabel({ Icon, tone, children }: { Icon: LucideIcon; tone: Tone; 
 
 /* ---------------------------------------------------------------------- */
 /* Department composition — combines each department's share of overall  */
-/* tracked attendance with its own Present/Late/Absent split, so one card */
+/* tracked attendance with its own Present/Late/Missed split, so one card */
 /* answers both "how much of overall attendance is this department" and  */
 /* "how is that department doing". Kept on this app's existing status    */
 /* palette (emerald/amber/red) rather than a new color scheme, since     */
-/* that mapping already means Present/Late/Absent everywhere else in the */
+/* that mapping already means Present/Late/Missed everywhere else in the */
 /* app (badges, the ring above, etc.).                                   */
 /* ---------------------------------------------------------------------- */
 
@@ -507,7 +539,7 @@ function DepartmentComposition({
             className={cn('grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3', GAP.grid)}
         >
             {rows.map((dept, index) => {
-                const tracked = dept.present + dept.late + dept.absent;
+                const tracked = dept.present + dept.late + dept.missed;
                 const presentPct = tracked > 0 ? (dept.present / tracked) * 100 : 0;
                 const latePct = tracked > 0 ? (dept.late / tracked) * 100 : 0;
                 const absentPct = tracked > 0 ? 100 - presentPct - latePct : 0;
@@ -574,7 +606,7 @@ function DepartmentComposition({
                                 <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-caption text-muted-foreground">
                                     <LegendDot tone="emerald">Present {Math.round(presentPct)}%</LegendDot>
                                     <LegendDot tone="amber">Late {Math.round(latePct)}%</LegendDot>
-                                    <LegendDot tone="red">Absent {Math.round(absentPct)}%</LegendDot>
+                                    <LegendDot tone="red">Missed {Math.round(absentPct)}%</LegendDot>
                                     <span className="ml-auto tabular-nums">{tracked} tracked</span>
                                 </div>
 
@@ -645,9 +677,9 @@ function ScoreHero({
     eyebrow: string;
     caption: string;
     /**
-     * When provided, the ring is drawn as a Present/Late/Absent-style
+     * When provided, the ring is drawn as a Present/Late/Missed-style
      * multi-color donut (see SegmentedRing) instead of a single gradient
-     * arc — so a student whose 67% is "1 present, 1 late, 1 absent" sees
+     * arc — so a student whose 67% is "1 present, 1 late, 1 missed" sees
      * a green, amber and red slice rather than one flat red arc that only
      * reflects the tier, not the actual mix behind it.
      */
@@ -905,7 +937,7 @@ function ActiveSessionCard({ session, status }: { session: DashboardActiveSessio
 const STATUS_TONE: Record<AttendanceStatus, Tone> = {
     [AttendanceStatus.Present]: 'emerald',
     [AttendanceStatus.Late]: 'amber',
-    [AttendanceStatus.Absent]: 'red',
+    [AttendanceStatus.Missed]: 'red',
     [AttendanceStatus.Excluded]: 'neutral',
     [AttendanceStatus.Pending]: 'neutral',
 };
@@ -924,7 +956,7 @@ function statusLabel(status: AttendanceStatus): string {
     const labels: Record<AttendanceStatus, string> = {
         [AttendanceStatus.Present]: 'Present',
         [AttendanceStatus.Late]: 'Late',
-        [AttendanceStatus.Absent]: 'Absent',
+        [AttendanceStatus.Missed]: 'Missed',
         [AttendanceStatus.Excluded]: 'Excluded',
         [AttendanceStatus.Pending]: 'Pending',
     };

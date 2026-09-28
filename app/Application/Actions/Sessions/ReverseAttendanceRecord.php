@@ -35,7 +35,7 @@ final class ReverseAttendanceRecord
      *  - The spec for this is "back to pending, can be scanned again."
      *    Pending is the *absence* of a record — every reader in the app
      *    (BuildSessionReport, BuildAttendanceHistory, the roster/master
-     *    reports, EndSession's absent sweep) already treats "no row" as
+     *    reports, EndSession's missed sweep) already treats "no row" as
      *    pending/not-yet-checked-in. Deleting therefore restores exactly
      *    that state everywhere at once, with no reader changes.
      *  - A flag column would instead need every one of those readers to
@@ -93,7 +93,7 @@ final class ReverseAttendanceRecord
 
             if ($locked->scanned_at === null) {
                 // Defensive: the only rows with a null scanned_at are the
-                // Absent ones EndSession backfills, which means the
+                // Missed ones EndSession backfills, which means the
                 // session already ended and the status guard above should
                 // have caught it. Kept so a future writer of null-scan
                 // rows can't quietly make "reverse" mean "delete an

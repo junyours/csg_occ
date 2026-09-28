@@ -28,20 +28,20 @@ function semesterTestStaff(string $role, string $studentNumber): Student
     ]);
 }
 
-function semesterTestAcademicYear(Student $createdBy, string $name = '2026-2027'): AcademicYear
+function semesterTestAcademicYear(Student $createdBy, string $name = '2026-2027', bool $active = false): AcademicYear
 {
-    return AcademicYear::firstOrCreate(['name' => $name], ['created_by' => $createdBy->id]);
+    return AcademicYear::firstOrCreate(['name' => $name], ['created_by' => $createdBy->id, 'is_active' => $active]);
 }
 
 it('rejects an unauthenticated semester list request', function () {
-    $admin = semesterTestStaff('csg_admin', '2020000001');
+    $admin = semesterTestStaff('system_admin', '2020000001');
     $academicYear = semesterTestAcademicYear($admin);
 
     $this->getJson("/api/academic-years/{$academicYear->id}/semesters")->assertStatus(401);
 });
 
 it('lets any authenticated role list semesters for an academic year', function () {
-    $admin = semesterTestStaff('csg_admin', '2020000001');
+    $admin = semesterTestStaff('system_admin', '2020000001');
     $academicYear = semesterTestAcademicYear($admin);
     Semester::create(['academic_year_id' => $academicYear->id, 'name' => 'semester_1', 'created_by' => $admin->id]);
     $officer = semesterTestStaff('officer', '2020200001');
@@ -53,7 +53,7 @@ it('lets any authenticated role list semesters for an academic year', function (
 });
 
 it('rejects semester creation from a non-admin role', function () {
-    $admin = semesterTestStaff('csg_admin', '2020000001');
+    $admin = semesterTestStaff('system_admin', '2020000001');
     $academicYear = semesterTestAcademicYear($admin);
     $officer = semesterTestStaff('officer', '2020200001');
 
@@ -62,128 +62,98 @@ it('rejects semester creation from a non-admin role', function () {
         ->assertStatus(403);
 });
 
-it('lets a csg admin create a semester under an academic year', function () {
-    $admin = semesterTestStaff('csg_admin', '2020000001');
+it('lets a system admin create a semester, always inactive', function () {
+    $admin = semesterTestStaff('system_admin', '2020000001');
     $academicYear = semesterTestAcademicYear($admin);
 
     $this->actingAs($admin, 'sanctum')
-        ->postJson("/api/academic-years/{$academicYear->id}/semesters", [
-            'name' => 'semester_1',
-            'start_date' => '2026-08-01',
-            'end_date' => '2026-12-15',
-        ])
+        ->postJson("/api/academic-years/{$academicYear->id}/semesters", ['name' => 'semester_1', 'start_date' => '2026-08-01', 'end_date' => '2026-12-15', 'is_active' => true])
         ->assertStatus(201)
-        ->assertJsonPath('name', 'semester_1')
         ->assertJsonPath('academic_year_id', $academicYear->id)
         ->assertJsonPath('is_active', false);
 });
 
+it('rejects semester create/edit/activate/deactivate from a csg admin', function () {
+    $sys = semesterTestStaff('system_admin', '2020000009');
+    $csg = semesterTestStaff('csg_admin', '2020000001');
+    $year = semesterTestAcademicYear($sys, '2026-2027', true);
+    $semester = Semester::create(['academic_year_id' => $year->id, 'name' => 'semester_1', 'created_by' => $sys->id]);
+
+    $this->actingAs($csg, 'sanctum')->postJson("/api/academic-years/{$year->id}/semesters", ['name' => 'semester_2'])->assertStatus(403);
+    $this->actingAs($csg, 'sanctum')->patchJson("/api/semesters/{$semester->id}", ['start_date' => '2026-08-15'])->assertStatus(403);
+    $this->actingAs($csg, 'sanctum')->postJson("/api/semesters/{$semester->id}/activate")->assertStatus(403);
+    $this->actingAs($csg, 'sanctum')->postJson("/api/semesters/{$semester->id}/deactivate")->assertStatus(403);
+
+    expect($semester->fresh()->is_active)->toBeFalse();
+});
+
 it('rejects a duplicate semester name within the same academic year', function () {
-    $admin = semesterTestStaff('csg_admin', '2020000001');
-    $academicYear = semesterTestAcademicYear($admin);
-    Semester::create(['academic_year_id' => $academicYear->id, 'name' => 'semester_1', 'created_by' => $admin->id]);
+    $admin = semesterTestStaff('system_admin', '2020000001');
+    $year = semesterTestAcademicYear($admin);
+    Semester::create(['academic_year_id' => $year->id, 'name' => 'semester_1', 'created_by' => $admin->id]);
 
-    $this->actingAs($admin, 'sanctum')
-        ->postJson("/api/academic-years/{$academicYear->id}/semesters", ['name' => 'semester_1'])
-        ->assertStatus(422)
-        ->assertJsonValidationErrors('name');
+    $this->actingAs($admin, 'sanctum')->postJson("/api/academic-years/{$year->id}/semesters", ['name' => 'semester_1'])
+        ->assertStatus(422)->assertJsonValidationErrors('name');
 });
 
-it('allows the same semester name across two different academic years', function () {
-    $admin = semesterTestStaff('csg_admin', '2020000001');
-    $yearOne = semesterTestAcademicYear($admin, '2025-2026');
-    $yearTwo = semesterTestAcademicYear($admin, '2026-2027');
-    Semester::create(['academic_year_id' => $yearOne->id, 'name' => 'semester_1', 'created_by' => $admin->id]);
+it('lets a system admin edit a semester without touching is_active', function () {
+    $admin = semesterTestStaff('system_admin', '2020000001');
+    $year = semesterTestAcademicYear($admin);
+    $semester = Semester::create(['academic_year_id' => $year->id, 'name' => 'semester_1', 'is_active' => true, 'created_by' => $admin->id]);
 
-    $this->actingAs($admin, 'sanctum')
-        ->postJson("/api/academic-years/{$yearTwo->id}/semesters", ['name' => 'semester_1'])
-        ->assertStatus(201);
-});
-
-it('lets a csg admin edit a semester without touching is_active', function () {
-    $admin = semesterTestStaff('csg_admin', '2020000001');
-    $academicYear = semesterTestAcademicYear($admin);
-    $semester = Semester::create([
-        'academic_year_id' => $academicYear->id, 'name' => 'semester_1',
-        'is_active' => true, 'created_by' => $admin->id,
-    ]);
-
-    $response = $this->actingAs($admin, 'sanctum')
-        ->patchJson("/api/semesters/{$semester->id}", ['start_date' => '2026-08-15'])
-        ->assertStatus(200)
-        ->assertJsonPath('is_active', true);
+    $response = $this->actingAs($admin, 'sanctum')->patchJson("/api/semesters/{$semester->id}", ['start_date' => '2026-08-15'])
+        ->assertStatus(200)->assertJsonPath('is_active', true);
 
     expect($response->json('start_date'))->toStartWith('2026-08-15');
 });
 
-it('lets a csg admin activate a semester, retiring the previous one in the same academic year', function () {
-    $admin = semesterTestStaff('csg_admin', '2020000001');
-    $academicYear = semesterTestAcademicYear($admin);
-    $old = Semester::create([
-        'academic_year_id' => $academicYear->id, 'name' => 'semester_1',
-        'is_active' => true, 'created_by' => $admin->id,
-    ]);
-    $new = Semester::create([
-        'academic_year_id' => $academicYear->id, 'name' => 'semester_2',
-        'is_active' => false, 'created_by' => $admin->id,
-    ]);
+it('activates a semester of the active year; 409 if another is active or the year is inactive', function () {
+    $admin = semesterTestStaff('system_admin', '2020000001');
+    $year = semesterTestAcademicYear($admin, '2026-2027', true);
+    $other = semesterTestAcademicYear($admin, '2025-2026', false);
+    $one = Semester::create(['academic_year_id' => $year->id, 'name' => 'semester_1', 'created_by' => $admin->id]);
+    $two = Semester::create(['academic_year_id' => $year->id, 'name' => 'semester_2', 'created_by' => $admin->id]);
+    $inactiveYearSem = Semester::create(['academic_year_id' => $other->id, 'name' => 'semester_1', 'created_by' => $admin->id]);
 
-    $this->actingAs($admin, 'sanctum')
-        ->postJson("/api/semesters/{$new->id}/activate")
-        ->assertStatus(200)
-        ->assertJsonPath('is_active', true);
+    $this->actingAs($admin, 'sanctum')->postJson("/api/semesters/{$inactiveYearSem->id}/activate")->assertStatus(409);
+    $this->actingAs($admin, 'sanctum')->postJson("/api/semesters/{$one->id}/activate")->assertStatus(200)->assertJsonPath('is_active', true);
+    $this->actingAs($admin, 'sanctum')->postJson("/api/semesters/{$two->id}/activate")
+        ->assertStatus(409)->assertJsonPath('message', 'Deactivate the current semester first.');
 
-    expect($old->fresh()->is_active)->toBeFalse();
+    expect($one->fresh()->is_active)->toBeTrue()->and($two->fresh()->is_active)->toBeFalse();
 });
 
-it('does not retire an active semester belonging to a different academic year', function () {
-    $admin = semesterTestStaff('csg_admin', '2020000001');
-    $yearOne = semesterTestAcademicYear($admin, '2025-2026');
-    $yearTwo = semesterTestAcademicYear($admin, '2026-2027');
-    $otherYearActive = Semester::create([
-        'academic_year_id' => $yearOne->id, 'name' => 'semester_1',
-        'is_active' => true, 'created_by' => $admin->id,
-    ]);
-    $target = Semester::create([
-        'academic_year_id' => $yearTwo->id, 'name' => 'semester_1',
-        'is_active' => false, 'created_by' => $admin->id,
-    ]);
+it('lets a system admin deactivate a semester, sweeping the other accounts', function () {
+    $admin = semesterTestStaff('system_admin', '2020000001');
+    $csg = semesterTestStaff('csg_admin', '2020000002');
+    $year = semesterTestAcademicYear($admin, '2026-2027', true);
+    $semester = Semester::create(['academic_year_id' => $year->id, 'name' => 'semester_1', 'is_active' => true, 'created_by' => $admin->id]);
 
-    $this->actingAs($admin, 'sanctum')
-        ->postJson("/api/semesters/{$target->id}/activate")
-        ->assertStatus(200)
-        ->assertJsonPath('is_active', true);
+    $this->actingAs($admin, 'sanctum')->postJson("/api/semesters/{$semester->id}/deactivate")
+        ->assertStatus(200)->assertJsonPath('is_active', false);
 
-    expect($otherYearActive->fresh()->is_active)->toBeTrue();
+    expect($csg->fresh()->role->value)->toBe('student')
+        ->and($csg->fresh()->status)->toBe('inactive')
+        ->and($admin->fresh()->status)->toBe('active');
 });
 
-it('lets a csg admin deactivate a semester', function () {
-    $admin = semesterTestStaff('csg_admin', '2020000001');
-    $academicYear = semesterTestAcademicYear($admin);
-    $semester = Semester::create([
-        'academic_year_id' => $academicYear->id, 'name' => 'semester_1',
-        'is_active' => true, 'created_by' => $admin->id,
-    ]);
+it('answers 409 naming ongoing events when deactivating', function () {
+    $admin = semesterTestStaff('system_admin', '2020000001');
+    $year = semesterTestAcademicYear($admin, '2026-2027', true);
+    $semester = Semester::create(['academic_year_id' => $year->id, 'name' => 'semester_1', 'is_active' => true, 'created_by' => $admin->id]);
+    \App\Models\EventModel::create(['name' => 'Foundation Day', 'created_by' => $admin->id, 'semester_id' => $semester->id]);
 
-    $this->actingAs($admin, 'sanctum')
-        ->postJson("/api/semesters/{$semester->id}/deactivate")
-        ->assertStatus(200)
-        ->assertJsonPath('is_active', false);
+    $this->actingAs($admin, 'sanctum')->postJson("/api/semesters/{$semester->id}/deactivate")
+        ->assertStatus(409)->assertJsonPath('events', ['Foundation Day']);
+
+    expect($semester->fresh()->is_active)->toBeTrue();
 });
 
 it('rejects semester activate/deactivate from a non-admin role', function () {
-    $admin = semesterTestStaff('csg_admin', '2020000001');
+    $admin = semesterTestStaff('system_admin', '2020000001');
     $officer = semesterTestStaff('officer', '2020200001');
-    $academicYear = semesterTestAcademicYear($admin);
-    $semester = Semester::create([
-        'academic_year_id' => $academicYear->id, 'name' => 'semester_1', 'created_by' => $admin->id,
-    ]);
+    $semester = Semester::create(['academic_year_id' => semesterTestAcademicYear($admin)->id, 'name' => 'semester_1', 'created_by' => $admin->id]);
 
-    $this->actingAs($officer, 'sanctum')
-        ->postJson("/api/semesters/{$semester->id}/activate")
-        ->assertStatus(403);
-
-    $this->actingAs($officer, 'sanctum')
-        ->postJson("/api/semesters/{$semester->id}/deactivate")
-        ->assertStatus(403);
+    $this->actingAs($officer, 'sanctum')->postJson("/api/semesters/{$semester->id}/activate")->assertStatus(403);
+    $this->actingAs($officer, 'sanctum')->postJson("/api/semesters/{$semester->id}/deactivate")->assertStatus(403);
 });

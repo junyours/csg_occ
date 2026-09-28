@@ -33,13 +33,15 @@ export interface MasterReportEvent {
     status: string;
     present: number;
     late: number;
-    absent: number;
+    missed: number;
     excluded: number;
 }
 
 export interface MasterReport {
     academic_year: { id: number; name: string } | null;
     semester: { id: number; name: string } | null;
+    /** False when a past semester was requested (record-driven numbers). */
+    is_current?: boolean;
     events: MasterReportEvent[];
 }
 
@@ -133,8 +135,10 @@ export const httpReportsRepository = {
     },
 
     /** GET /reports/master — the Settings → Reports landing screen. */
-    async getMasterReport(): Promise<MasterReport> {
-        const response = await httpClient.get('/reports/master');
+    async getMasterReport(semesterId?: number | null): Promise<MasterReport> {
+        const response = await httpClient.get('/reports/master', {
+            params: semesterId ? { semester_id: semesterId } : undefined,
+        });
         return response.data;
     },
 

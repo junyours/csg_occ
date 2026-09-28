@@ -3,7 +3,9 @@
 namespace App\Application\Actions\Students;
 
 use App\Domain\Enums\Role;
+use App\Domain\Exceptions\NoActiveSemesterException;
 use App\Domain\Exceptions\TooManyImportRowsException;
+use App\Domain\Support\CurrentSemester;
 use App\Domain\ValueObjects\SectionFilename;
 use App\Imports\StudentsImport;
 use App\Models\Department;
@@ -94,7 +96,10 @@ final class BulkImportStudents
         return [
             'total_files' => $result['total_files'],
             'total_rows' => $result['total_rows'],
-            'imported' => $result['valid'],
+            'imported' => $result['created'] + $result['updated'],
+            'created' => $result['created'],
+            'updated' => $result['updated'],
+            'skipped' => $result['skipped'],
             'failed' => $result['invalid'],
             'errors' => $errors,
         ];
@@ -105,7 +110,13 @@ final class BulkImportStudents
      */
     private function process(array $files, Student $actor, bool $commit): array
     {
-        $departmentsByCode = Department::all()->keyBy(fn ($d) => strtoupper($d->code));
+        // Never import without an active semester (preview included).
+        $currentSemesterId = CurrentSemester::id()
+            ?? throw new NoActiveSemesterException('There is no active semester to import students into.');
+
+        $departments = Department::all();
+        $departmentsByCode = $departments->keyBy(fn ($d) => strtoupper($d->code));
+        $departmentsById = $departments->keyBy('id');
 
         // Student numbers already committed to earlier in *this same*
         // batch — a duplicate across two different section files in one
@@ -114,6 +125,7 @@ final class BulkImportStudents
         $fileResults = [];
         $totalRows = 0;
         $totalValid = 0;
+        $totals = ['create' => 0, 'update' => 0, 'skip' => 0];
 
         foreach ($files as $file) {
             $filename = $file->getClientOriginalName();
@@ -179,52 +191,84 @@ final class BulkImportStudents
 
             $rowResults = [];
 
+            $numbersInFile = $rows
+                ->map(fn ($row) => trim((string) ($row['id_number'] ?? $row['student_number'] ?? '')))
+                ->filter(fn (string $number) => $number !== '')
+                ->unique()->values()->all();
+            $existingByNumber = $numbersInFile === []
+                ? collect()
+                : Student::whereIn('student_number', $numbersInFile)->get()->keyBy('student_number');
+
             foreach ($rows as $index => $row) {
-                // Row 1 is the heading row, so the first data row is 2 —
-                // matching the row number a person would see if they
-                // opened the file in Excel and needed to go fix
-                // something.
+                // Row 1 is the heading row, so the first data row is 2.
                 $lineNumber = $index + 2;
                 $studentNumber = trim((string) ($row['id_number'] ?? $row['student_number'] ?? ''));
+                $existing = $studentNumber !== '' ? $existingByNumber->get($studentNumber) : null;
 
-                $reasons = $this->validateRow($row, $studentNumber, $seenNumbers);
+                $reasons = $this->validateRow($row, $studentNumber, $seenNumbers, $existing);
                 $isValid = $reasons === [];
+                $action = null;
+                $change = null;
 
                 if ($isValid) {
                     $seenNumbers[$studentNumber] = true;
+
+                    // Upsert: unknown -> create; already in the current
+                    // semester AND active -> skip; otherwise update + activate.
+                    if ($existing === null) {
+                        $action = 'create';
+                    } elseif ((int) $existing->semester_id === $currentSemesterId && ! $existing->isInactive()) {
+                        $action = 'skip';
+                    } else {
+                        $action = 'update';
+                        $change = $this->describeChange($existing, $department, $section, $departmentsById);
+                    }
                 }
 
                 $dateEnrolled = $this->parseDate($row['date_enrolled'] ?? null);
 
-                if ($isValid && $commit) {
+                if ($isValid && $commit && $action !== 'skip') {
                     try {
-                        (new CreateStudent)([
-                            'student_number' => $studentNumber,
-                            'last_name' => trim((string) $row['last_name']),
-                            'first_name' => trim((string) $row['first_name']),
-                            'middle_name' => $this->nullableTrim($row['middle_name'] ?? null),
-                            'department_id' => $department->id,
-                            'major' => $section->major,
-                            'year_level' => $section->yearLevel,
-                            'section' => $section->section,
-                            'date_enrolled' => $dateEnrolled,
-                        ]);
+                        if ($action === 'update') {
+                            (new ReenrollStudent)($existing, [
+                                'department_id' => $department->id,
+                                'major' => $section->major,
+                                'year_level' => $section->yearLevel,
+                                'section' => $section->section,
+                                'date_enrolled' => $dateEnrolled,
+                            ]);
+                        } else {
+                            (new CreateStudent)([
+                                'student_number' => $studentNumber,
+                                'last_name' => trim((string) $row['last_name']),
+                                'first_name' => trim((string) $row['first_name']),
+                                'middle_name' => $this->nullableTrim($row['middle_name'] ?? null),
+                                'department_id' => $department->id,
+                                'major' => $section->major,
+                                'year_level' => $section->yearLevel,
+                                'section' => $section->section,
+                                'date_enrolled' => $dateEnrolled,
+                            ]);
+                        }
                     } catch (Throwable $e) {
-                        // A row can still fail here despite passing
-                        // validateRow() — e.g. a duplicate student_number
-                        // created by a *different concurrent* import
-                        // between our upfront check and this insert.
-                        // Recorded as a normal per-row failure rather
-                        // than aborting the rest of the batch.
+                        // e.g. a concurrent import created the same number.
                         $isValid = false;
+                        $action = null;
+                        $change = null;
                         $reasons = ['Could not be created: '.$e->getMessage()];
                     }
+                }
+
+                if ($action !== null) {
+                    $totals[$action]++;
                 }
 
                 $rowResults[] = [
                     'row' => $lineNumber,
                     'valid' => $isValid,
                     'reasons' => $reasons,
+                    'action' => $action,
+                    'change' => $change,
                     'student_number' => $studentNumber ?: null,
                     'last_name' => $this->nullableTrim($row['last_name'] ?? null),
                     'first_name' => $this->nullableTrim($row['first_name'] ?? null),
@@ -254,6 +298,9 @@ final class BulkImportStudents
             'total_rows' => $totalRows,
             'valid' => $totalValid,
             'invalid' => $totalRows - $totalValid,
+            'created' => $totals['create'],
+            'updated' => $totals['update'],
+            'skipped' => $totals['skip'],
             'files' => $fileResults,
         ];
     }
@@ -262,7 +309,7 @@ final class BulkImportStudents
      * @param  array<string, bool>  $seenNumbers
      * @return array<int, string>
      */
-    private function validateRow(Collection $row, string $studentNumber, array $seenNumbers): array
+    private function validateRow(Collection $row, string $studentNumber, array $seenNumbers, ?Student $existing): array
     {
         $reasons = [];
 
@@ -276,20 +323,38 @@ final class BulkImportStudents
             $reasons[] = 'Missing required field: id_number';
         }
 
-        // Every reason below needs a real student_number to check
-        // against, so stop here rather than reporting confusing
-        // secondary errors off an already-missing field.
         if ($reasons !== []) {
             return $reasons;
         }
 
         if (isset($seenNumbers[$studentNumber])) {
             $reasons[] = 'Duplicate student ID within this batch';
-        } elseif (Student::where('student_number', $studentNumber)->exists()) {
-            $reasons[] = 'Student ID already exists';
+        } elseif ($existing?->role === Role::SystemAdmin) {
+            $reasons[] = 'System Admin account cannot be imported/changed here';
         }
 
         return $reasons;
+    }
+
+    /** "BSIT-2A → BSBA-FM-3H" when placement changes; null when it doesn't. */
+    private function describeChange(Student $existing, Department $department, SectionFilename $section, Collection $departmentsById): ?string
+    {
+        $unchanged = (int) $existing->department_id === (int) $department->id
+            && ($existing->major ?? null) === $section->major
+            && ($existing->year_level ?? null) === $section->yearLevel
+            && ($existing->section ?? null) === $section->section;
+
+        if ($unchanged) {
+            return null;
+        }
+
+        $label = fn (?string $code, ?string $major, ?string $sectionName, ?string $yearLevel) => ($code ?? '—')
+            .($major ? '-'.$major : '')
+            .'-'.($sectionName ?: ($yearLevel ?: '—'));
+
+        return $label($departmentsById->get($existing->department_id)?->code, $existing->major, $existing->section, $existing->year_level)
+            .' → '
+            .$label($department->code, $section->major, $section->section, $section->yearLevel);
     }
 
     /**

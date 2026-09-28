@@ -34,6 +34,14 @@ class AttendanceHistoryController extends Controller
             $filters['scanned_by'] = $user->id;
         }
 
-        return response()->json($buildAttendanceHistory($filters));
+        $payload = $buildAttendanceHistory($filters)->toArray();
+
+        // "All semesters": per-semester totals for the whole filtered set,
+        // so the page can put a subtotal under each semester heading.
+        if (($filters['scope'] ?? null) === 'all') {
+            $payload['semester_summary'] = $buildAttendanceHistory->semesterSummary($filters);
+        }
+
+        return response()->json($payload);
     }
 }

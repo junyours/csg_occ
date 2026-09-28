@@ -24,7 +24,7 @@ final class EndEvent
      *  1. Force-ends every currently `ongoing` session under it, running
      *     each through the exact same EndSession action a CSG Admin would
      *     trigger by tapping "End" on that session individually — so
-     *     late/absent finalization and penalty application happen exactly
+     *     late/missed finalization and penalty application happen exactly
      *     once, the normal way, for every open window. `scheduled`
      *     sessions (never started) are left alone: there's nothing to
      *     finalize for a session that never opened, and no attendance

@@ -39,10 +39,10 @@ function endSessionEvent(): EventModel
             'last_name' => 'Admin', 'first_name' => 'CSG',
             'department_id' => endSessionDept('CCS')->id,
             'username' => 'csgadmin', 'password' => 'password',
-            'role' => Role::CsgAdmin, // must not default to 'student' — this
+            'role' => Role::SystemAdmin, // must not default to 'student' — this
             // account represents the organizer, not an attendee, and the
             // whole point of the EndSession fix is that organizers are
-            // never swept into the absent-marking query.
+            // never swept into the missed-marking query.
         ],
     );
 
@@ -97,7 +97,7 @@ function endSessionStudent(string $studentNumber, int $qrVersion = 1, ?string $d
     ]);
 }
 
-it('marks every student with no scan as Absent and charges the absent penalty', function () {
+it('marks every student with no scan as Missed and charges the missed penalty', function () {
     $session = endSessionSession();
     $student = endSessionStudent('2023000001');
 
@@ -105,7 +105,7 @@ it('marks every student with no scan as Absent and charges the absent penalty', 
 
     $record = AttendanceRecord::where('session_id', $session->id)->where('student_id', $student->id)->first();
 
-    expect($record->status)->toBe(AttendanceStatus::Absent)
+    expect($record->status)->toBe(AttendanceStatus::Missed)
         ->and($record->scanned_at)->toBeNull()
         ->and($result['absent_created'])->toBe(1)
         ->and((float) $result['penalty_total'])->toBe(25.0);
@@ -116,7 +116,7 @@ it('marks every student with no scan as Absent and charges the absent penalty', 
     expect($session->status)->toBe(SessionStatus::Ended);
 });
 
-it('ends the time-out sibling session independently, absent for the missed check only', function () {
+it('ends the time-out sibling session independently, missed for the missed check only', function () {
     $timeIn = endSessionSession();
     $timeOut = endSessionTimeOutSibling($timeIn);
     $student = endSessionStudent('2023000002');
@@ -131,12 +131,12 @@ it('ends the time-out sibling session independently, absent for the missed check
     $timeOutRecord = AttendanceRecord::where('session_id', $timeOut->id)->where('student_id', $student->id)->first();
 
     expect($timeInRecord->status)->toBe(AttendanceStatus::Present) // time-in untouched by ending time-out
-        ->and($timeOutRecord->status)->toBe(AttendanceStatus::Absent)
+        ->and($timeOutRecord->status)->toBe(AttendanceStatus::Missed)
         ->and($result['absent_created'])->toBe(1) // a fresh record was created for the missed time-out
-        ->and((float) $result['penalty_total'])->toBe(25.0); // absent penalty for the missed time-out
+        ->and((float) $result['penalty_total'])->toBe(25.0); // missed penalty for the missed time-out
 });
 
-it('writes a permanent excluded record (not absent) and charges no penalty for excluded students', function () {
+it('writes a permanent excluded record (not missed) and charges no penalty for excluded students', function () {
     $session = endSessionSession();
     $event = $session->eventDay->event;
     $excludedStudent = endSessionStudent('2023000003');
@@ -162,7 +162,7 @@ it('writes a permanent excluded record (not absent) and charges no penalty for e
         ->and($record->status)->toBe(AttendanceStatus::Excluded)
         ->and($record->scanned_at)->toBeNull()
         ->and(AttendancePenalty::where('student_id', $excludedStudent->id)->exists())->toBeFalse()
-        ->and($result['absent_created'])->toBe(0); // excluded, not counted as absent
+        ->and($result['absent_created'])->toBe(0); // excluded, not counted as missed
 });
 
 it('keeps an excluded student\'s session reading Excluded even after the exclusion is later removed', function () {
@@ -222,7 +222,7 @@ it('does not double-charge a penalty if applyPenalties logic ran on the same rec
         [
             'student_id' => $record->student_id,
             'session_id' => $session->id,
-            'reason' => 'Absent - Time In',
+            'reason' => 'Missed - Time In',
         ],
         ['amount' => 25],
     );
@@ -239,14 +239,14 @@ it('throws when ending a session that has already ended', function () {
     (new EndSession)($session);
 })->throws(SessionAlreadyEndedException::class);
 
-it('never sweeps a student from an excluded department into Absent, and never penalizes them', function () {
+it('never sweeps a student from an excluded department into Missed, and never penalizes them', function () {
     $creator = Student::firstOrCreate(
         ['student_number' => '2020000001'],
         [
             'last_name' => 'Admin', 'first_name' => 'CSG',
             'department_id' => endSessionDept('CCS')->id,
             'username' => 'csgadmin', 'password' => 'password',
-            'role' => Role::CsgAdmin,
+            'role' => Role::SystemAdmin,
         ],
     );
     $bsit = endSessionDept('BSIT');
@@ -261,11 +261,11 @@ it('never sweeps a student from an excluded department into Absent, and never pe
 
     $result = (new EndSession)($session);
 
-    // The BSIT student was never scanned — swept into Absent as normal.
+    // The BSIT student was never scanned — swept into Missed as normal.
     $includedRecord = AttendanceRecord::where('session_id', $session->id)
         ->where('student_id', $includedStudent->id)->first();
     expect($includedRecord)->not->toBeNull()
-        ->and($includedRecord->status)->toBe(AttendanceStatus::Absent);
+        ->and($includedRecord->status)->toBe(AttendanceStatus::Missed);
 
     // The BSBA student's department was never part of this event's scope
     // — no attendance_records row, and no penalty, even though they also
@@ -276,7 +276,7 @@ it('never sweeps a student from an excluded department into Absent, and never pe
         ->and($result['absent_created'])->toBe(1); // only the BSIT student
 });
 
-it('marks every student absent as usual when the event has no department restriction', function () {
+it('marks every student missed as usual when the event has no department restriction', function () {
     $session = endSessionSession(); // endSessionEvent() — no departments synced, unrestricted
     endSessionStudent('2023000012', departmentCode: 'BSIT');
     endSessionStudent('2023000013', departmentCode: 'BSBA');
@@ -284,4 +284,72 @@ it('marks every student absent as usual when the event has no department restric
     $result = (new EndSession)($session);
 
     expect($result['absent_created'])->toBe(2);
+});
+
+it('skips inactive accounts entirely: no record, no penalty', function () {
+    $session = endSessionSession();
+    $student = endSessionStudent('2023000001');
+    $student->update(['status' => 'inactive']);
+
+    $result = (new EndSession)($session);
+
+    expect(AttendanceRecord::where('student_id', $student->id)->count())->toBe(0)
+        ->and($result['absent_created'])->toBe(0)
+        ->and(AttendancePenalty::count())->toBe(0);
+});
+
+it('auto-marks active staff Present at the session start with no penalty', function () {
+    $session = endSessionSession();
+    $officer = endSessionStudent('2023000002');
+    $officer->update(['role' => Role::Officer]);
+    $student = endSessionStudent('2023000003');
+
+    $result = (new EndSession)($session);
+
+    $staffRecord = AttendanceRecord::where('student_id', $officer->id)->first();
+
+    expect($staffRecord->status)->toBe(AttendanceStatus::Present)
+        ->and($staffRecord->auto_present)->toBeTrue()
+        ->and($staffRecord->scanned_by)->toBeNull()
+        ->and($staffRecord->scanned_at)->not->toBeNull()
+        ->and($result['absent_created'])->toBe(1)
+        ->and(AttendancePenalty::where('student_id', $officer->id)->count())->toBe(0)
+        ->and(AttendanceRecord::where('student_id', $student->id)->first()->status)->toBe(AttendanceStatus::Missed);
+});
+
+it('never gives System Admin an attendance record', function () {
+    $session = endSessionSession();
+
+    (new EndSession)($session);
+
+    expect(AttendanceRecord::where('session_id', $session->id)->count())->toBe(0);
+});
+
+it('lets an exclusion outrank the staff auto-Present', function () {
+    $event = endSessionEvent();
+    $session = endSessionSession([], $event);
+    $officer = endSessionStudent('2023000002');
+    $officer->update(['role' => Role::Officer]);
+    Exclusion::create([
+        'student_id' => $officer->id, 'event_id' => $event->id,
+        'scope' => ExclusionScope::Event, 'reason' => 'Excused', 'created_by' => $officer->id,
+    ]);
+
+    (new EndSession)($session);
+
+    $record = AttendanceRecord::where('student_id', $officer->id)->first();
+    expect($record->status)->toBe(AttendanceStatus::Excluded)->and($record->auto_present)->toBeFalse();
+});
+
+it('writes the enrollment snapshot onto swept Missed records', function () {
+    $session = endSessionSession();
+    $student = endSessionStudent('2023000001');
+    $student->update(['major' => 'FM', 'section' => '2A', 'year_level' => '2']);
+
+    (new EndSession)($session);
+    $student->update(['section' => '9Z']);
+
+    expect(AttendanceRecord::where('student_id', $student->id)->first())
+        ->section->toBe('2A')->major->toBe('FM')->year_level->toBe('2')
+        ->department_id->toBe($student->department_id);
 });

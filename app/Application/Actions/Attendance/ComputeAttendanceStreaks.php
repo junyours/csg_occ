@@ -4,6 +4,7 @@ namespace App\Application\Actions\Attendance;
 
 use App\Domain\Enums\AttendanceStatus;
 use App\Domain\Enums\Role;
+use App\Domain\Support\CurrentSemester;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\EventModel;
@@ -36,7 +37,7 @@ final class ComputeAttendanceStreaks
      *
      *  - Present: the running streak goes up by one, and becomes the new
      *    "longest" if it's now the best run seen so far.
-     *  - Late or Absent: the running streak resets to 0. These are the
+     *  - Late or Missed: the running streak resets to 0. These are the
      *    only two outcomes that ever break a streak.
      *  - Excluded, or not yet resolved (the session hasn't ended and the
      *    student hasn't scanned): the running streak is left completely
@@ -46,7 +47,7 @@ final class ComputeAttendanceStreaks
      *    a streak that's otherwise intact.
      *
      * Also tracks, per student, the scanned_at of their most recent real
-     * scan (Present or Late — Absent never has one) — this is what
+     * scan (Present or Late — Missed never has one) — this is what
      * BuildStreakLeaderboard uses to break a tie between two students on
      * the same current streak: whoever's last scan landed earlier ranks
      * first. Because the sessions are walked in ascending chronological
@@ -69,7 +70,9 @@ final class ComputeAttendanceStreaks
      */
     public function __invoke(?int $onlyStudentId = null): Collection
     {
+        // Streak-eligible = active plain students only (never staff).
         $students = Student::where('role', Role::Student)
+            ->activeAccounts()
             ->when($onlyStudentId, fn ($q) => $q->where('id', $onlyStudentId))
             ->get(['id', 'department_id']);
 
@@ -79,8 +82,14 @@ final class ComputeAttendanceStreaks
             return collect();
         }
 
+        // A streak resets each term: only the current semester's sessions.
+        $currentSemesterId = CurrentSemester::id();
+
         $sessions = AttendanceSession::with('eventDay.event.departments')
             ->get()
+            ->filter(fn (AttendanceSession $session) => $currentSemesterId === null
+                || $session->eventDay->event->semester_id === null
+                || (int) $session->eventDay->event->semester_id === $currentSemesterId)
             ->sortBy(function (AttendanceSession $session) {
                 $day = $session->eventDay;
 
@@ -160,7 +169,7 @@ final class ComputeAttendanceStreaks
                     if ($record?->scanned_at) {
                         $latestScanAt = $record->scanned_at;
                     }
-                } elseif ($status === AttendanceStatus::Absent) {
+                } elseif ($status === AttendanceStatus::Missed) {
                     $running = 0;
                 }
                 // Excluded, or still-pending (null): carries through

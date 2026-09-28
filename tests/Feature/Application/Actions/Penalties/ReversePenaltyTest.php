@@ -57,7 +57,7 @@ function reversePenaltyPenalty(Student $student, AttendanceSession $session): At
         'student_id' => $student->id,
         'session_id' => $session->id,
         'amount' => 25,
-        'reason' => 'Absent - Time In',
+        'reason' => 'Missed - Time In',
     ]);
 }
 

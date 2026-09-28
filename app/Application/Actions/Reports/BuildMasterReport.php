@@ -4,6 +4,8 @@ namespace App\Application\Actions\Reports;
 
 use App\Domain\Enums\Role;
 use App\Domain\Enums\SessionStatus;
+use App\Domain\Support\CurrentSemester;
+use App\Domain\Support\SemesterScope;
 use App\Models\AcademicYear;
 use App\Models\AttendanceSession;
 use App\Models\EventModel;
@@ -16,52 +18,56 @@ use Illuminate\Support\Facades\DB;
 /**
  * The Settings → Reports landing screen (spec: clicking "Reports" shows
  * every event for the current active academic year and semester, with
- * total Present, Absent, Late, and Excluded) — a birds-eye summary,
+ * total Present, Missed, Late, and Excluded) — a birds-eye summary,
  * unlike BuildEventRosterReport which drills into one event's printable
  * per-student roster.
  */
 final class BuildMasterReport
 {
     /**
-     * @param  int|null  $departmentId  An SC Admin's own department,
-     *                                  forced by the controller; null
-     *                                  counts every department.
-     * @return array{
-     *     academic_year: ?array{id: int, name: string},
-     *     semester: ?array{id: int, name: string},
-     *     events: array<int, array{id: int, name: string, status: string, present: int, late: int, absent: int, excluded: int}>,
-     * }
+     * @param  int|null  $departmentId  SC Admin's own department (forced by controller).
+     * @param  int|null  $semesterId  A specific semester; null = current active one.
      */
-    public function __invoke(?int $departmentId = null): array
+    public function __invoke(?int $departmentId = null, ?int $semesterId = null): array
     {
-        $academicYear = AcademicYear::active()->first();
-        $semester = $academicYear
-            ? Semester::active()->forAcademicYear($academicYear->id)->first()
-            : null;
+        if ($semesterId !== null) {
+            $semester = Semester::with('academicYear')->find($semesterId);
+            $academicYear = $semester?->academicYear;
+        } else {
+            // The one shared "active year + active semester" lookup. The
+            // year is still looked up on its own when no semester is
+            // active, so the empty report keeps naming the active year.
+            $semester = CurrentSemester::get()?->loadMissing('academicYear');
+            $academicYear = $semester?->academicYear ?? AcademicYear::active()->first();
+        }
 
         if (! $academicYear || ! $semester) {
             return [
                 'academic_year' => $academicYear ? ['id' => $academicYear->id, 'name' => $academicYear->name] : null,
                 'semester' => null,
+                'is_current' => false,
                 'events' => [],
             ];
         }
 
-        // Loaded once per department_id, not once per event id/department
-        // pair — summarizeEvent() below intersects this with each event's
-        // own includedDepartmentIds() instead of re-querying.
-        $roster = Student::where('role', Role::Student)
-            ->when($departmentId, fn ($q) => $q->where('department_id', $departmentId))
-            ->get(['id', 'department_id']);
+        // Current term: live roster. Past term: record-driven (snapshot department).
+        $live = CurrentSemester::isCurrent($semester->id);
 
-        // Eager-load departments so includedDepartmentIds() below doesn't
-        // fire a query per event.
+        $people = $live
+            ? Student::attendees()
+                ->when($departmentId, fn ($q) => $q->where('department_id', $departmentId))
+                ->get(['id', 'department_id', 'role', 'status'])
+            : collect();
+
         $events = EventModel::forSemester($semester->id)->with('departments')->orderBy('id')->get();
 
         return [
             'academic_year' => ['id' => $academicYear->id, 'name' => $academicYear->name],
             'semester' => ['id' => $semester->id, 'name' => $semester->name->value],
-            'events' => $events->map(fn (EventModel $event) => $this->summarizeEvent($event, $roster))->values()->all(),
+            'is_current' => $live,
+            'events' => $events
+                ->map(fn (EventModel $event) => $this->summarizeEvent($event, $people, $live, $departmentId))
+                ->values()->all(),
         ];
     }
 
@@ -71,20 +77,36 @@ final class BuildMasterReport
      *                                             viewer's own department,
      *                                             if any) — narrowed here
      *                                             to this event's scope.
-     * @return array{id: int, name: string, status: string, present: int, late: int, absent: int, excluded: int}
+     * @return array{id: int, name: string, status: string, present: int, late: int, missed: int, excluded: int}
      */
-    private function summarizeEvent(EventModel $event, Collection $roster): array
+    private function summarizeEvent(EventModel $event, Collection $people, bool $live, ?int $departmentId): array
     {
-        // Never counts a student whose department isn't part of this
-        // event's scope (see EventModel::includedDepartmentIds) — same
-        // reasoning as BuildSessionReport / BuildEventRosterReport.
-        $includedDepartmentIds = $event->includedDepartmentIds();
-        $rosterIds = $roster
-            ->filter(fn (Student $student) => in_array($student->department_id, $includedDepartmentIds, true))
-            ->pluck('id');
-
         $sessions = AttendanceSession::whereHas('eventDay', fn ($q) => $q->where('event_id', $event->id))->get();
         $sessionIds = $sessions->pluck('id');
+
+        $recordHolderIds = DB::table('attendance_records')
+            ->join('students', 'students.id', '=', 'attendance_records.student_id')
+            ->whereIn('attendance_records.session_id', $sessionIds)
+            ->when(! $live && $departmentId, fn ($q) => $q->whereRaw(SemesterScope::RECORD_DEPARTMENT.' = ?', [$departmentId]))
+            ->distinct()
+            ->pluck('attendance_records.student_id');
+
+        if ($live) {
+            // In the event's departments; active, or already holding a record here.
+            $includedDepartmentIds = $event->includedDepartmentIds();
+            $rosterIds = $people
+                ->filter(fn (Student $p) => in_array($p->department_id, $includedDepartmentIds, true)
+                    && ($p->status !== Student::STATUS_INACTIVE || $recordHolderIds->contains($p->id)))
+                ->pluck('id');
+        } else {
+            $rosterIds = $recordHolderIds->values();
+        }
+
+        // For sessions ended without EndSession: active students -> Missed, staff -> Present.
+        $activeIds = $live
+            ? $people->filter(fn (Student $p) => $p->status !== Student::STATUS_INACTIVE)->pluck('id')
+            : collect();
+        $staffIds = $people->filter(fn (Student $p) => $p->role !== Role::Student)->pluck('id');
 
         // Plain DB query builder, not Eloquent — grouping by a column
         // that's cast to an enum (AttendanceRecord::$casts) would hand
@@ -98,7 +120,7 @@ final class BuildMasterReport
             ->pluck('total', 'status');
 
         // A session ended the normal way (through EndSession) already
-        // has a real attendance_records row — present, late, absent, or
+        // has a real attendance_records row — present, late, missed, or
         // a permanently-persisted excluded row (see
         // EndSession::markMissingRecords) — for every roster student, so
         // $statusCounts above already reflects it correctly and
@@ -122,6 +144,7 @@ final class BuildMasterReport
         // live sweep below.
         $excludedTotal = (int) ($statusCounts['excluded'] ?? 0);
         $unrecordedAbsentTotal = 0;
+        $unrecordedStaffPresentTotal = 0;
 
         foreach ($sessions as $session) {
             $recordedIds = $recordedStudentIdsBySession->get($session->id, collect());
@@ -136,11 +159,11 @@ final class BuildMasterReport
             $sessionExcludedIds = $rosterIds->intersect($excludedIds)->diff($recordedIds);
             $excludedTotal += $sessionExcludedIds->count();
 
-            if ($session->status === SessionStatus::Ended) {
-                $unrecordedAbsentTotal += $rosterIds
-                    ->diff($sessionExcludedIds)
-                    ->diff($recordedIds)
-                    ->count();
+            if ($live && $session->status === SessionStatus::Ended) {
+                $unrecorded = $rosterIds->intersect($activeIds)->diff($sessionExcludedIds)->diff($recordedIds);
+                $staffCount = $unrecorded->intersect($staffIds)->count();
+                $unrecordedStaffPresentTotal += $staffCount;
+                $unrecordedAbsentTotal += $unrecorded->count() - $staffCount;
             }
         }
 
@@ -148,9 +171,9 @@ final class BuildMasterReport
             'id' => $event->id,
             'name' => $event->name,
             'status' => $event->status->value,
-            'present' => (int) ($statusCounts['present'] ?? 0),
+            'present' => (int) ($statusCounts['present'] ?? 0) + $unrecordedStaffPresentTotal,
             'late' => (int) ($statusCounts['late'] ?? 0),
-            'absent' => (int) ($statusCounts['absent'] ?? 0) + $unrecordedAbsentTotal,
+            'missed' => (int) ($statusCounts['missed'] ?? 0) + $unrecordedAbsentTotal,
             'excluded' => $excludedTotal,
         ];
     }

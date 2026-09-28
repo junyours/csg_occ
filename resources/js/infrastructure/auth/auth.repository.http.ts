@@ -11,7 +11,7 @@ interface StudentDto {
     suffix: string | null;
     department_id: number;
     // Present when the backend eager-loads the department relation
-    // (AuthenticateStudent / AuthController::me both do) — absent only
+    // (AuthenticateStudent / AuthController::me both do) — missed only
     // if some future caller of this DTO skips that load.
     department?: { id: number; name: string; code: string } | null;
     major: string | null;

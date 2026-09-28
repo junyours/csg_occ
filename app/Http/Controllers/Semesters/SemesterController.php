@@ -11,6 +11,7 @@ use App\Http\Requests\Semesters\StoreSemesterRequest;
 use App\Http\Requests\Semesters\UpdateSemesterRequest;
 use App\Models\AcademicYear;
 use App\Models\Semester;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 
 class SemesterController extends Controller
@@ -43,10 +44,10 @@ class SemesterController extends Controller
         return response()->json($activateSemester($semester));
     }
 
-    public function deactivate(Semester $semester, DeactivateSemester $deactivateSemester)
+    public function deactivate(Request $request, Semester $semester, DeactivateSemester $deactivateSemester)
     {
         Gate::authorize('update', Semester::class);
 
-        return response()->json($deactivateSemester($semester));
+        return response()->json($deactivateSemester($semester, $request->user()));
     }
 }

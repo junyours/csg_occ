@@ -27,7 +27,7 @@ function masterReportAdmin(): Student
             'last_name' => 'Admin', 'first_name' => 'CSG',
             'department_id' => masterReportDept('CCS')->id,
             'username' => 'csgadmin', 'password' => 'password',
-            'role' => 'csg_admin',
+            'role' => 'system_admin',
         ],
     );
 }
@@ -110,7 +110,7 @@ it('lists every event in the active academic year and semester with its status',
         ->and($report['events'][0]['name'])->toBe('Intramurals 2026');
 });
 
-it('counts absent students against an unrestricted event regardless of department', function () {
+it('counts missed students against an unrestricted event regardless of department', function () {
     $event = masterReportEvent('Open Event'); // no department_ids — unrestricted
     masterReportSession($event);
     masterReportStudent('2023100001', 'BSIT');
@@ -118,10 +118,10 @@ it('counts absent students against an unrestricted event regardless of departmen
 
     $report = (new BuildMasterReport)();
 
-    expect($report['events'][0]['absent'])->toBe(2);
+    expect($report['events'][0]['missed'])->toBe(2);
 });
 
-it('never counts a student whose department is outside the event scope, in absent totals', function () {
+it('never counts a student whose department is outside the event scope, in missed totals', function () {
     $bsit = masterReportDept('BSIT');
     $bed = masterReportDept('BED');
     $bsba = masterReportDept('BSBA');
@@ -136,9 +136,9 @@ it('never counts a student whose department is outside the event scope, in absen
     $report = (new BuildMasterReport)();
 
     // Only the two in-scope students were ever eligible, so only they
-    // get swept into the absent total — the out-of-scope BSBA student
+    // get swept into the missed total — the out-of-scope BSBA student
     // was never part of this event's roster in the first place.
-    expect($report['events'][0]['absent'])->toBe(2);
+    expect($report['events'][0]['missed'])->toBe(2);
 });
 
 it('never counts a student whose department is outside the event scope, in present totals', function () {
@@ -185,7 +185,7 @@ it('scopes counts to both the viewer\'s own department and the event\'s departme
 
     $report = (new BuildMasterReport)($bsit->id);
 
-    expect($report['events'][0]['absent'])->toBe(1);
+    expect($report['events'][0]['missed'])->toBe(1);
 });
 
 it('spans every event in the semester, each with its own independent department scope', function () {
@@ -204,7 +204,7 @@ it('spans every event in the semester, each with its own independent department 
     $byName = collect($report['events'])->keyBy('name');
 
     // BSIT-only event: only the BSIT student was ever eligible.
-    expect($byName['BSIT-only Event']['absent'])->toBe(1)
+    expect($byName['BSIT-only Event']['missed'])->toBe(1)
         // Open event: both students are eligible, unrestricted.
-        ->and($byName['Open Event']['absent'])->toBe(2);
+        ->and($byName['Open Event']['missed'])->toBe(2);
 });

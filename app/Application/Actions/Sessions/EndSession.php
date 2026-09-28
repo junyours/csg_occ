@@ -19,15 +19,15 @@ final class EndSession
 {
     /**
      * End a session (spec §7.2): mark every eligible, non-excluded
-     * student with no record for this session as Absent for the single
+     * student with no record for this session as Missed for the single
      * check this session represents. A window with both a time-in and a
      * time-out session ends each independently — ending the time-in
      * session never touches the time-out session's records, and vice
      * versa — since each is its own AttendanceSession row now (see
      * App\Domain\Enums\CheckType).
      *
-     * Penalty amounts (configured per session for Late and Absent) are
-     * applied here too, for every Late/Absent outcome that exists once
+     * Penalty amounts (configured per session for Late and Missed) are
+     * applied here too, for every Late/Missed outcome that exists once
      * the session closes. Late is *decided* the instant a student scans
      * (TimeWindow::classify in ScanAttendance), but the penalty ledger
      * write happens here so every money-affecting write for a session
@@ -36,7 +36,7 @@ final class EndSession
      *
      * Excluded students with no existing record get a permanent
      * `excluded` AttendanceRecord written here (see markMissingRecords)
-     * instead of an Absent one, and no penalty is charged for it. This
+     * instead of an Missed one, and no penalty is charged for it. This
      * is written as a real row — not left to be derived live from the
      * exclusions table at report time — specifically so an already-
      * ended session's outcome can never change again: per
@@ -53,7 +53,7 @@ final class EndSession
      * being excluded — §2 rule 4's "mid-window guard") keeps that
      * record and its penalty exactly as if they'd never been excluded:
      * an exclusion never rewrites or un-charges something that already
-     * genuinely happened, it only ever prevents new Absent/penalty
+     * genuinely happened, it only ever prevents new Missed/penalty
      * writes going forward.
      *
      * @return array{session_id: int, present: int, late: int, absent_created: int, penalty_total: float}
@@ -90,48 +90,60 @@ final class EndSession
     }
 
     /**
-     * Every student with zero attendance_records row for this session
-     * gets one written here: Absent for the single check this session
-     * covers, or — for a student currently excluded from it — a
-     * permanent `excluded` row instead (see the class docblock for why
-     * this is written as a real row rather than left to be derived live
-     * from the exclusions table).
+     * Every active attendee with no record gets one written: an active
+     * `student` -> Missed; an active CSG/SC Admin/Officer -> Present at the
+     * session start (auto_present, no penalty); anyone excluded -> a
+     * permanent `excluded` row (outranks auto-Present). Inactive accounts get
+     * nothing; System Admin is never an attendee. Rows carry the enrollment
+     * snapshot and the *event's* semester.
+     *
+     * @return int  Missed rows created.
      */
     private function markMissingRecords(AttendanceSession $session, array $excludedStudentIds, Carbon $now): int
     {
         $studentIdsWithRecord = AttendanceRecord::where('session_id', $session->id)->pluck('student_id');
 
-        // Mirrors Student::isAttendanceEligibleForEvent in SQL form (a bulk
-        // query can't call the per-row model method): only role=student
-        // accounts are ever eligible. System Admin, CSG Admin, SC Admin,
-        // and Officer never appear here — they're staff running or
-        // staffing the event, not people being checked for attendance.
-        //
-        // Also scoped to the event's included departments (see
-        // EventModel::includedDepartmentIds) — a student whose department
-        // was never part of this event must never be swept into Absent
-        // (and therefore never penalized) here just because they have no
-        // record for a session they were never supposed to attend.
-        $includedDepartmentIds = $session->eventDay->event->includedDepartmentIds();
+        $event = $session->eventDay->event;
+        $includedDepartmentIds = $event->includedDepartmentIds();
+        $semesterId = $event->semester_id;
 
-        $missingStudentIds = Student::where('role', Role::Student)
-            ->whereIn('department_id', $includedDepartmentIds)
-            ->whereNotIn('id', $studentIdsWithRecord)
-            ->pluck('id');
+        // ->utc(): raw insert stores wall-clock digits verbatim; the window
+        // start is an Asia/Manila instant.
+        $autoPresentAt = $session->window()->start()->copy()->utc();
 
         $absentCreated = 0;
 
-        foreach ($missingStudentIds->chunk(500) as $chunk) {
-            $rows = $chunk->map(function (int $studentId) use ($session, $excludedStudentIds, $now, &$absentCreated) {
-                $isExcluded = in_array($studentId, $excludedStudentIds, true);
-                $absentCreated += $isExcluded ? 0 : 1;
+        $accounts = Student::attendees()
+            ->activeAccounts()
+            ->whereIn('department_id', $includedDepartmentIds)
+            ->whereNotIn('id', $studentIdsWithRecord)
+            ->get(['id', 'role', 'department_id', 'major', 'section', 'year_level']);
+
+        foreach ($accounts->chunk(500) as $chunk) {
+            $rows = $chunk->map(function (Student $account) use ($session, $excludedStudentIds, $now, $semesterId, $autoPresentAt, &$absentCreated) {
+                if (in_array($account->id, $excludedStudentIds, true)) {
+                    $status = AttendanceStatus::Excluded;
+                } elseif ($account->role !== Role::Student) {
+                    $status = AttendanceStatus::Present;
+                } else {
+                    $status = AttendanceStatus::Missed;
+                    $absentCreated++;
+                }
+
+                $autoPresent = $status === AttendanceStatus::Present;
 
                 return [
                     'session_id' => $session->id,
-                    'student_id' => $studentId,
-                    'scanned_at' => null,
-                    'status' => ($isExcluded ? AttendanceStatus::Excluded : AttendanceStatus::Absent)->value,
+                    'student_id' => $account->id,
+                    'scanned_at' => $autoPresent ? $autoPresentAt : null,
+                    'status' => $status->value,
                     'scanned_by' => null,
+                    'department_id' => $account->department_id,
+                    'major' => $account->major,
+                    'section' => $account->section,
+                    'year_level' => $account->year_level,
+                    'semester_id' => $semesterId,
+                    'auto_present' => $autoPresent,
                     'created_at' => $now,
                     'updated_at' => $now,
                 ];
@@ -151,9 +163,9 @@ final class EndSession
     /**
      * Runs over every attendance_records row for this session, including
      * the `excluded` rows markMissingRecords() just wrote — but
-     * penalizeIfNeeded() below only ever charges Late/Absent, so an
+     * penalizeIfNeeded() below only ever charges Late/Missed, so an
      * excluded row (and a Present one) contributes 0 here regardless. A
-     * student who reaches this method with a real Present/Late/Absent
+     * student who reaches this method with a real Present/Late/Missed
      * status despite currently being excluded only got there via a
      * genuine pre-exclusion scan (the mid-window guard case) and is
      * penalized exactly as if they'd never been excluded.
@@ -188,7 +200,7 @@ final class EndSession
     {
         $amount = match ($status) {
             AttendanceStatus::Late => (float) $session->penalty_late_amount,
-            AttendanceStatus::Absent => (float) $session->penalty_absent_amount,
+            AttendanceStatus::Missed => (float) $session->penalty_absent_amount,
             default => 0.0,
         };
 

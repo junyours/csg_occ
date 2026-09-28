@@ -44,7 +44,7 @@ export type EventStatus = (typeof EventStatus)[keyof typeof EventStatus];
 export const AttendanceStatus = {
     Present: 'present',
     Late: 'late',
-    Absent: 'absent',
+    Missed: 'missed',
     Excluded: 'excluded',
     Pending: 'pending',
 } as const;
@@ -124,11 +124,18 @@ export const SEMESTER_LABEL: Record<Semester, string> = {
     [Semester.Summer]: 'Summer',
 };
 
+/** Label for a semester name as the API sends it ("semester_1"); unknown values pass through. */
+export function semesterLabel(name: string | null | undefined): string {
+    if (!name) return 'No semester';
+
+    return SEMESTER_LABEL[name as Semester] ?? name;
+}
+
 /** Attendance status → badge variant, kept in one place so every list/report matches. */
 export const ATTENDANCE_STATUS_LABEL: Record<AttendanceStatus, string> = {
     [AttendanceStatus.Present]: 'Present',
     [AttendanceStatus.Late]: 'Late',
-    [AttendanceStatus.Absent]: 'Absent',
+    [AttendanceStatus.Missed]: 'Missed',
     [AttendanceStatus.Excluded]: 'Excluded',
     [AttendanceStatus.Pending]: 'Pending',
 };
@@ -164,13 +171,13 @@ export const EVENT_STATUS_BADGE_CLASS: Record<EventStatus, string> = {
 
 /**
  * AttendanceStatus → badge color classes (pass to Badge's className, on top
- * of variant="secondary"). Present is emerald, late is amber, absent is
+ * of variant="secondary"). Present is emerald, late is amber, missed is
  * red, excluded/pending stay neutral gray.
  */
 export const ATTENDANCE_STATUS_BADGE_CLASS: Record<AttendanceStatus, string> = {
     [AttendanceStatus.Present]: 'border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300',
     [AttendanceStatus.Late]: 'border-transparent bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
-    [AttendanceStatus.Absent]: 'border-transparent bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300',
+    [AttendanceStatus.Missed]: 'border-transparent bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300',
     [AttendanceStatus.Excluded]: 'border-transparent bg-muted text-muted-foreground',
     [AttendanceStatus.Pending]: 'border-transparent bg-muted text-muted-foreground',
 };
@@ -200,3 +207,6 @@ export const EXCLUSION_STATUS_LABEL: Record<ExclusionStatus, string> = {
   hardcoded gray, so "Ended"/"Pending" actually match the surrounding
   surface in both themes.
 */
+
+/** Student lifecycle state (students.status). Inactive accounts can't sign in or be scanned. */
+export type StudentStatus = 'active' | 'inactive';

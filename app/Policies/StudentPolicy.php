@@ -25,6 +25,24 @@ class StudentPolicy
         return false;
     }
 
+    /** "Edit student": System/CSG any; SC Admin only their own department. */
+    public function update(Student $user, Student $target): bool
+    {
+        if (in_array($user->role, [Role::SystemAdmin, Role::CsgAdmin], true)) {
+            return true;
+        }
+
+        return $user->role === Role::ScAdmin
+            && $user->sc_admin_department_id !== null
+            && $user->sc_admin_department_id === $target->department_id;
+    }
+
+    /** Same reach as update(); never your own account. */
+    public function updateStatus(Student $user, Student $target): bool
+    {
+        return ! $user->is($target) && $this->update($user, $target);
+    }
+
     /**
      * Spec §4.2: bulk import is available to the same actors as single-add
      * (§4.1) — CSG/System Admin for any department, SC Admin for their
@@ -77,6 +95,40 @@ class StudentPolicy
 
         return in_array($newRole, $assignable, true)
             && ($target->role === Role::Student || in_array($target->role, $assignable, true));
+    }
+
+    /**
+     * "Reset to default password" — an admin puts someone's password back to
+     * the default and forces a change at next login.
+     *
+     * Same rank-and-department rule as who may see whom on the Password
+     * Reset Codes screen (PasswordResetCode::scopeVisibleTo), and for the
+     * same reason: being able to reset an account is being able to walk into
+     * it, so nobody may reset an account at or above their own rank.
+     *  - System Admin: everyone else.
+     *  - CSG Admin: SC Admins, Officers and Students (any department) —
+     *    never a CSG Admin or System Admin.
+     *  - SC Admin: Officers and Students of the department they administer
+     *    — never another SC Admin or anyone above.
+     * Nobody resets their own account here; that's what Change password is for.
+     */
+    public function resetPassword(Student $user, Student $target): bool
+    {
+        if ($user->is($target)) {
+            return false;
+        }
+
+        return match ($user->role) {
+            Role::SystemAdmin => true,
+
+            Role::CsgAdmin => in_array($target->role, [Role::ScAdmin, Role::Officer, Role::Student], true),
+
+            Role::ScAdmin => $user->sc_admin_department_id !== null
+                && $user->sc_admin_department_id === $target->department_id
+                && in_array($target->role, [Role::Officer, Role::Student], true),
+
+            default => false,
+        };
     }
 
     /**

@@ -17,7 +17,7 @@ return new class extends Migration
             $table->foreignId('student_id')->constrained();
 
             $table->timestamp('scanned_at')->nullable();
-            $table->string('status'); // present|late|absent|excluded
+            $table->string('status'); // present|late|missed|excluded
             $table->foreignId('scanned_by')->nullable()->constrained('students');
 
             $table->timestamps();

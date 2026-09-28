@@ -14,6 +14,9 @@ export function useSetSemesterActive(academicYearId: number) {
             active ? httpSemestersRepository.activate(id) : httpSemestersRepository.deactivate(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: semestersQueryKey(academicYearId) });
+            // Activating/deactivating a semester changes what "current" means
+            // everywhere (and deactivation resets roles/statuses), so refetch all.
+            queryClient.invalidateQueries();
         },
     });
 }

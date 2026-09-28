@@ -48,7 +48,7 @@ function attendanceRecordEventTestSetup(string $eventName): array
     return [$event, $session, $student, $admin];
 }
 
-it('scopes present, absent, and late records to the event they belong to', function () {
+it('scopes present, missed, and late records to the event they belong to', function () {
     [$eventOne, $sessionOne, $studentOne, $admin] = attendanceRecordEventTestSetup('Event One');
     [$eventTwo, $sessionTwo, $studentTwo] = attendanceRecordEventTestSetup('Event Two');
 
@@ -62,7 +62,7 @@ it('scopes present, absent, and late records to the event they belong to', funct
     ]);
     AttendanceRecord::create([
         'session_id' => $sessionTwo->id, 'student_id' => $studentTwo->id,
-        'status' => AttendanceStatus::Absent, 'scanned_by' => $admin->id,
+        'status' => AttendanceStatus::Missed, 'scanned_by' => $admin->id,
     ]);
 
     $eventOneRecords = AttendanceRecord::forEvent($eventOne->id)->get();
@@ -72,5 +72,5 @@ it('scopes present, absent, and late records to the event they belong to', funct
         ->and($eventOneRecords->pluck('student_id')->all())->toContain($studentOne->id, $admin->id)
         ->and($eventTwoRecords)->toHaveCount(1)
         ->and($eventTwoRecords->first()->student_id)->toBe($studentTwo->id)
-        ->and($eventTwoRecords->first()->status)->toBe(AttendanceStatus::Absent);
+        ->and($eventTwoRecords->first()->status)->toBe(AttendanceStatus::Missed);
 });

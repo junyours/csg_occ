@@ -112,4 +112,37 @@ final class RosterReportColumnGrouper
             ];
         }, $events));
     }
+
+    /**
+     * One more level above groupByEventDayAndWindow, for a master report
+     * that spans semesters: how many session columns each semester's
+     * events cover, in column order, so the renderers can merge one
+     * semester header across them. Purely display-side — semesters and
+     * their event_ids come from BuildMasterRosterReport, and events are
+     * already contiguous per semester there.
+     *
+     * @param  array<int, array{event_id: int, span: int}>  $eventColumns  From groupByEventDayAndWindow.
+     * @param  array<int, array{label: string, event_ids: array<int, int>}>  $semesters
+     * @return array<int, array{label: string, span: int}>
+     */
+    public static function groupBySemester(array $eventColumns, array $semesters): array
+    {
+        $blocks = [];
+
+        foreach ($semesters as $semester) {
+            $span = 0;
+
+            foreach ($eventColumns as $eventColumn) {
+                if (in_array($eventColumn['event_id'], $semester['event_ids'], true)) {
+                    $span += $eventColumn['span'];
+                }
+            }
+
+            if ($span > 0) {
+                $blocks[] = ['label' => $semester['label'], 'span' => $span];
+            }
+        }
+
+        return $blocks;
+    }
 }

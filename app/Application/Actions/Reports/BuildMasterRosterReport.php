@@ -3,7 +3,9 @@
 namespace App\Application\Actions\Reports;
 
 use App\Domain\Enums\AttendanceStatus;
-use App\Domain\Enums\Role;
+use App\Domain\Support\CurrentSemester;
+use App\Domain\Support\ReportRoster;
+use App\Domain\Support\SemesterLabel;
 use App\Models\AttendancePenalty;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
@@ -22,6 +24,12 @@ use Illuminate\Support\Collection;
  * BuildEventRosterReport — one shared roster, not one per event, since
  * the whole point of a master report is comparing the same students
  * across events rather than re-listing them per event.
+ *
+ * A selection may span several semesters (§2.2d). Events are then kept
+ * together by semester — semesters in the order they first appear in the
+ * selection, the given order preserved inside each — and `semesters`
+ * names each block so the exports can label it. A selection inside one
+ * semester (or with no semester at all) is left exactly as given.
  */
 final class BuildMasterRosterReport
 {
@@ -35,7 +43,7 @@ final class BuildMasterRosterReport
      *                                        not event id or start date.
      * @param  callable|null  $onGroupBuilt  Same per-group progress hook as
      *                                       BuildEventRosterReport; a no-op when null.
-     * @return array{events: array, sessions: array, groups: array}
+     * @return array{events: array, sessions: array, groups: array, semesters: array, spans_semesters: bool}
      */
     public function __invoke(
         iterable $events,
@@ -45,7 +53,7 @@ final class BuildMasterRosterReport
         ?string $section = null,
         ?callable $onGroupBuilt = null,
     ): array {
-        $events = collect($events)->values();
+        $events = $this->groupBySemester(collect($events)->values());
 
         $sessionMeta = $events
             ->flatMap(fn (EventModel $event) => $this->sessionsForEvent($event))
@@ -53,14 +61,11 @@ final class BuildMasterRosterReport
 
         $sessionIds = $sessionMeta->pluck('id');
 
-        $roster = Student::where('role', Role::Student)
-            ->when($departmentId, fn ($q) => $q->where('department_id', $departmentId))
-            ->when(filled($major), fn ($q) => $q->where('major', $major))
-            ->when(filled($yearLevel), fn ($q) => $q->where('year_level', $yearLevel))
-            ->when(filled($section), fn ($q) => $q->where('section', $section))
-            ->with('department')
-            ->orderBy('last_name')->orderBy('first_name')
-            ->get();
+        $live = $events->every(fn (EventModel $event) => CurrentSemester::usesLiveRoster($event->semester_id));
+
+        $roster = $live
+            ? ReportRoster::live($sessionIds, null, $departmentId, $major, $yearLevel, $section)
+            : ReportRoster::historical($sessionIds, $departmentId, $major, $yearLevel, $section);
 
         $rosterIds = $roster->pluck('id');
 
@@ -87,8 +92,8 @@ final class BuildMasterRosterReport
         );
 
         // See BuildEventRosterReport for why this exists — sessions whose
-        // Late/Absent penalty was later reversed should read "Reversed"
-        // on the roster, not "Absent"/"Late".
+        // Late/Missed penalty was later reversed should read "Reversed"
+        // on the roster, not "Missed"/"Late".
         //
         // Guarded on nothing being left outstanding for that session:
         // attendance_penalties has no unique (student_id, session_id) key
@@ -133,11 +138,66 @@ final class BuildMasterRosterReport
             ->values()
             ->all();
 
+        $semesters = $this->semesterBlocks($events);
+
         return [
             'events' => $events->map(fn (EventModel $event) => ['id' => $event->id, 'name' => $event->name])->values()->all(),
             'sessions' => $sessionMeta->all(),
             'groups' => $groups,
+            'semesters' => $semesters,
+            'spans_semesters' => count($semesters) > 1,
         ];
+    }
+
+    /**
+     * Keeps every semester's events contiguous. Semesters keep the order
+     * they first appear in the selection and events keep their given
+     * order within one, so a single-semester selection comes back
+     * untouched. Events with no semester (legacy) form one block of
+     * their own.
+     *
+     * @param  Collection<int, EventModel>  $events
+     * @return Collection<int, EventModel>
+     */
+    private function groupBySemester(Collection $events): Collection
+    {
+        $events->each(fn (EventModel $event) => $event->loadMissing('semester.academicYear'));
+
+        $blockOrder = [];
+
+        foreach ($events as $event) {
+            $blockOrder[$event->semester_id ?? 0] ??= count($blockOrder);
+        }
+
+        return $events
+            ->sortBy(fn (EventModel $event, int $index) => sprintf('%05d-%05d', $blockOrder[$event->semester_id ?? 0], $index))
+            ->values();
+    }
+
+    /**
+     * One entry per semester block, in column order — what the exports
+     * print above the event headers when the report spans semesters.
+     *
+     * @param  Collection<int, EventModel>  $events  Already grouped by semester.
+     * @return list<array{id: ?int, label: string, is_current: bool, event_ids: list<int>}>
+     */
+    private function semesterBlocks(Collection $events): array
+    {
+        return $events
+            ->groupBy(fn (EventModel $event) => $event->semester_id ?? 0)
+            ->map(function (Collection $inSemester, int|string $semesterKey) {
+                $id = (int) $semesterKey === 0 ? null : (int) $semesterKey;
+                $isCurrent = CurrentSemester::isCurrent($id);
+
+                return [
+                    'id' => $id,
+                    'label' => SemesterLabel::for($inSemester->first()->semester).($isCurrent ? ' (current)' : ''),
+                    'is_current' => $isCurrent,
+                    'event_ids' => $inSemester->pluck('id')->values()->all(),
+                ];
+            })
+            ->values()
+            ->all();
     }
 
     /**
@@ -197,6 +257,7 @@ final class BuildMasterRosterReport
                     $student, $sessionMeta, $recordsBySession, $excludedBySession,
                     $reversedSessionIdsByStudent->get($student->id, collect()),
                 ),
+                'auto_sessions' => $this->autoSessionIdsFor($student, $sessionMeta, $recordsBySession),
                 'penalty_total' => $penaltyTotals->get($student->id, 0.0),
             ])
             ->values()
@@ -218,7 +279,7 @@ final class BuildMasterRosterReport
      * @param  Collection<int, array<int>>  $excludedBySession
      * @param  Collection<int, int>  $reversedSessionIds  Session ids (as keys)
      *                                                     for which this
-     *                                                     student's Late/Absent
+     *                                                     student's Late/Missed
      *                                                     penalty was reversed.
      * @return array<int, ?string>
      */
@@ -245,10 +306,10 @@ final class BuildMasterRosterReport
             //     was never a charge to forgive);
             //  2. any other real record beats the *live* exclusion flag —
             //     a student who genuinely scanned before being excluded
-            //     keeps that Present/Late/Absent outcome (§2 rule 4's
+            //     keeps that Present/Late/Missed outcome (§2 rule 4's
             //     "mid-window guard"), it is never rewritten to
             //     "Excluded" after the fact;
-            //  3. reversed outranks a stored Absent/Late, since the
+            //  3. reversed outranks a stored Missed/Late, since the
             //     roster is penalty-facing and the charge was undone;
             //  4. only a student with no record at all reads from the
             //     live exclusion flag.
@@ -262,5 +323,30 @@ final class BuildMasterRosterReport
         }
 
         return $statuses;
+    }
+
+    /**
+     * Ids of the sessions where this person's Present was written by
+     * EndSession's staff auto-Present (no scan, no scanner) — lets the
+     * exports label those cells "Auto — staff". `sessions` itself is
+     * untouched so its status strings keep their meaning everywhere.
+     *
+     * @param  Collection<int, array>  $sessionMeta
+     * @param  Collection<int, Collection>  $recordsBySession
+     * @return list<int>
+     */
+    private function autoSessionIdsFor(Student $student, Collection $sessionMeta, Collection $recordsBySession): array
+    {
+        $ids = [];
+
+        foreach ($sessionMeta as $session) {
+            $record = $recordsBySession->get($session['id'], collect())->get($student->id);
+
+            if ($record !== null && $record->auto_present && $record->status === AttendanceStatus::Present) {
+                $ids[] = $session['id'];
+            }
+        }
+
+        return $ids;
     }
 }

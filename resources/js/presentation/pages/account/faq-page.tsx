@@ -8,7 +8,7 @@ import { Heading, Text } from '@/presentation/components/typography';
 /**
  * Static, hand-written FAQ — best-guess questions a student using this app
  * would actually have, answered from how the system behaves (scanning,
- * late/absent classification, penalties, exclusions). Not fetched from the
+ * late/missed classification, penalties, exclusions). Not fetched from the
  * backend; there's no FAQ table or endpoint, just this page.
  */
 interface FaqItem {
@@ -26,16 +26,16 @@ const FAQ_ITEMS: FaqItem[] = [
         answer: "Every session has a scanning window set by the event organizers. If your scan lands after the on-time cutoff but before the window closes, it's automatically classified as Late instead of Present — there's no manual step involved.",
     },
     {
-        question: "What's the difference between Absent and Excluded?",
-        answer: "Absent means you were expected at a session and didn't scan in for it. Excluded means CSG excused you from that session (or window, or the whole event) ahead of time, so it never counts against your attendance rate or carries a penalty.",
+        question: "What's the difference between Missed and Excluded?",
+        answer: "Missed means you were expected at a session and didn't scan in for it. Excluded means CSG excused you from that session (or window, or the whole event) ahead of time, so it never counts against your attendance rate or carries a penalty.",
     },
     {
         question: 'My attendance percentage looks wrong — how is it calculated?',
-        answer: 'Your score is (Present + Late) sessions divided by all tracked sessions (Present + Late + Absent). Excluded sessions are left out of both sides of that math entirely, so being excused never drags your percentage down.',
+        answer: 'Your score is (Present + Late) sessions divided by all tracked sessions (Present + Late + Missed). Excluded sessions are left out of both sides of that math entirely, so being excused never drags your percentage down.',
     },
     {
         question: 'I got a penalty but I think it was a mistake — what now?',
-        answer: 'Penalties tied to a Late or Absent session can be reviewed and reversed by a CSG Admin. If one of yours gets reversed, it stops counting toward what you owe and any report generated afterward will show that session as Reversed rather than Absent.',
+        answer: 'Penalties tied to a Late or Missed session can be reviewed and reversed by a CSG Admin. If one of yours gets reversed, it stops counting toward what you owe and any report generated afterward will show that session as Reversed rather than Missed.',
     },
     {
         question: 'What happens if my QR code stops working?',

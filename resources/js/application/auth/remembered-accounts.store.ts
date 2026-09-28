@@ -38,14 +38,11 @@ export const useRememberedAccountsStore = create<RememberedAccountsState>()(
         }),
         {
             name: 'occ-csg-remembered-accounts',
-            // Deliberately localStorage, unlike auth.store's sessionStorage
-            // for the bearer token. This never holds a token or password —
+            // This never holds a token or password —
             // only non-secret identity metadata (student number, name,
             // avatar) needed to draw a "Welcome back" account card after
-            // logout, the same way auth.store's session dying with the tab
-            // is fine precisely because this list is what lets the login
-            // screen greet a returning student without needing the old
-            // session to still be alive.
+            // logout, so the login screen can greet a returning student
+            // without needing the old session to still be alive.
             storage: createJSONStorage(() => localStorage),
         },
     ),

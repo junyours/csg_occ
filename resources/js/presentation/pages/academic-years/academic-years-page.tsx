@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from 'react';
 import { CalendarRange } from 'lucide-react';
+import { Navigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
@@ -15,13 +16,14 @@ import { useUpdateAcademicYear } from '@/application/academic-years/use-update-a
 import { useSetAcademicYearActive } from '@/application/academic-years/use-set-academic-year-active';
 import type { AcademicYear } from '@/domain/entities';
 import { Role } from '@/domain/enums';
-import { cn, formatDate } from '@/lib/utils';
+import { apiErrorMessage, cn, formatDate } from '@/lib/utils';
 import { Heading, Text } from '@/presentation/components/typography';
 import { Tile } from '@/presentation/components/tile';
 import { TONE } from '@/presentation/components/tone';
 import { SemesterSection } from '@/presentation/pages/academic-years/semester-section';
 
-const MANAGE_ROLES: Role[] = [Role.SystemAdmin, Role.CsgAdmin];
+// System Admin only (AcademicYearPolicy); everyone else is redirected away.
+const MANAGE_ROLES: Role[] = [Role.SystemAdmin];
 
 interface AcademicYearFormValues {
     name: string;
@@ -44,6 +46,7 @@ export function AcademicYearsPage() {
     const [editForm, setEditForm] = useState<AcademicYearFormValues>(EMPTY_FORM);
 
     if (!student) return null;
+    if (!MANAGE_ROLES.includes(student.role)) return <Navigate to="/settings" replace />;
 
     const canManage = MANAGE_ROLES.includes(student.role);
 
@@ -70,8 +73,8 @@ export function AcademicYearsPage() {
                     setCreateForm(EMPTY_FORM);
                     setIsCreating(false);
                 },
-                onError: () => {
-                    toast.error("Could not create academic year. Check the name isn't already in use.");
+                onError: (error) => {
+                    toast.error(apiErrorMessage(error, "Could not create academic year. Check the name isn't already in use."));
                 },
             },
         );
@@ -93,8 +96,8 @@ export function AcademicYearsPage() {
                     toast.success('Academic year updated.');
                     setEditingId(null);
                 },
-                onError: () => {
-                    toast.error('Could not update academic year.');
+                onError: (error) => {
+                    toast.error(apiErrorMessage(error, 'Could not update academic year.'));
                 },
             },
         );
@@ -107,8 +110,9 @@ export function AcademicYearsPage() {
                 onSuccess: () => {
                     toast.success(year.isActive ? `${year.name} deactivated.` : `${year.name} activated.`);
                 },
-                onError: () => {
-                    toast.error('Could not update the active academic year.');
+                // e.g. SemesterStillActiveException: "A semester is still active. Deactivate it first."
+                onError: (error) => {
+                    toast.error(apiErrorMessage(error, 'Could not update the active academic year.'));
                 },
             },
         );
@@ -285,8 +289,8 @@ export function AcademicYearsPage() {
 
             <Separator />
             <Text variant="caption">
-                Only one academic year can be active at a time — activating one automatically deactivates the
-                previous one.
+                Only one academic year can be active at a time. To switch, deactivate the running semester first,
+                then deactivate this year and activate the next. Academic years are created inactive.
             </Text>
         </div>
     );

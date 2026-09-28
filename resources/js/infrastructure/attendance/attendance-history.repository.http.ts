@@ -25,11 +25,15 @@ export interface AttendanceHistoryEntry {
     yearLevel: string | null;
     section: string | null;
     status: AttendanceStatus;
+    /** Semester the record belongs to (snapshot, else its event's); null for legacy rows. */
+    semesterId: number | null;
     scannedAt: string | null;
-    /** Null for an Absent/Excluded/Pending row — nobody scanned it. */
+    /** Null for an Missed/Excluded/Pending row — nobody scanned it. */
     scannedBy: number | null;
     scannedByName: string | null;
     scannedByRole: string | null;
+    /** Staff attendance written automatically when the session ended (no scan). */
+    autoPresent: boolean;
     eventId: number;
     eventName: string;
     dayNumber: number;
@@ -38,7 +42,7 @@ export interface AttendanceHistoryEntry {
     checkType: CheckType;
 }
 
-export type AttendanceHistoryStatusFilter = 'all' | 'present' | 'late' | 'absent' | 'excluded';
+export type AttendanceHistoryStatusFilter = 'all' | 'present' | 'late' | 'missed' | 'excluded';
 export type AttendanceHistorySort = 'recent' | 'name' | 'course' | 'year_level' | 'section' | 'major' | 'event';
 
 export interface AttendanceHistoryFilters {
@@ -51,8 +55,23 @@ export interface AttendanceHistoryFilters {
     status?: AttendanceHistoryStatusFilter;
     search?: string;
     sort?: AttendanceHistorySort;
+    /** null/omitted = current semester; a number = that semester; 'all' = every semester. */
+    semester?: number | 'all' | null;
     page?: number;
     perPage?: number;
+}
+
+/** Totals for one semester over every row the filters match (only sent for "All semesters"). */
+export interface AttendanceHistorySemesterSummary {
+    semesterId: number | null;
+    semesterName: string | null;
+    academicYearName: string | null;
+    isCurrent: boolean;
+    count: number;
+    present: number;
+    late: number;
+    missed: number;
+    excluded: number;
 }
 
 export interface PaginatedAttendanceHistory {
@@ -61,6 +80,8 @@ export interface PaginatedAttendanceHistory {
     lastPage: number;
     total: number;
     perPage: number;
+    /** Present only when listing "All semesters"; newest semester first. */
+    semesterSummary?: AttendanceHistorySemesterSummary[];
 }
 
 /**
@@ -87,10 +108,12 @@ interface RawAttendanceHistoryEntry {
     year_level: string | null;
     section: string | null;
     status: string;
+    semester_id?: number | null;
     scanned_at: string | null;
     scanned_by: number | null;
     scanned_by_name: string | null;
     scanned_by_role: string | null;
+    auto_present?: boolean;
     event_id: number;
     event_name: string;
     day_number: number;
@@ -105,6 +128,17 @@ interface RawPaginatedAttendanceHistory {
     last_page: number;
     total: number;
     per_page: number;
+    semester_summary?: Array<{
+        semester_id: number | null;
+        semester_name: string | null;
+        academic_year_name: string | null;
+        is_current: boolean;
+        count: number;
+        present: number;
+        late: number;
+        missed: number;
+        excluded: number;
+    }>;
 }
 
 interface RawAttendanceHistoryFilterOptions {
@@ -127,10 +161,12 @@ function toAttendanceHistoryEntry(raw: RawAttendanceHistoryEntry): AttendanceHis
         yearLevel: raw.year_level,
         section: raw.section,
         status: raw.status as AttendanceStatus,
+        semesterId: raw.semester_id ?? null,
         scannedAt: raw.scanned_at,
         scannedBy: raw.scanned_by,
         scannedByName: raw.scanned_by_name,
         scannedByRole: raw.scanned_by_role,
+        autoPresent: raw.auto_present ?? false,
         eventId: raw.event_id,
         eventName: raw.event_name,
         dayNumber: raw.day_number,
@@ -156,6 +192,8 @@ export const httpAttendanceHistoryRepository = {
                 status: filters.status,
                 search: filters.search,
                 sort: filters.sort,
+                semester_id: typeof filters.semester === 'number' ? filters.semester : undefined,
+                scope: filters.semester === 'all' ? 'all' : undefined,
                 page: filters.page,
                 per_page: filters.perPage,
             },
@@ -167,6 +205,17 @@ export const httpAttendanceHistoryRepository = {
             lastPage: data.last_page,
             total: data.total,
             perPage: data.per_page,
+            semesterSummary: data.semester_summary?.map((row) => ({
+                semesterId: row.semester_id,
+                semesterName: row.semester_name,
+                academicYearName: row.academic_year_name,
+                isCurrent: row.is_current,
+                count: row.count,
+                present: row.present,
+                late: row.late,
+                missed: row.missed,
+                excluded: row.excluded,
+            })),
         };
     },
 

@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, Fragment, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Clock, RotateCcw, Wallet, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -12,6 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDepartments } from '@/application/departments/use-departments';
 import { useEvents } from '@/application/events/use-events';
+import { SemesterPicker, type SemesterSelection } from '@/presentation/components/semester-picker';
+import { SemesterGroupHeading } from '@/presentation/components/semester-group-heading';
 import { usePenalties } from '@/application/penalties/use-penalties';
 import { useReversePenalty } from '@/application/penalties/use-reverse-penalty';
 import type { PenaltyLedgerEntry } from '@/infrastructure/penalties/penalties.repository.http';
@@ -26,7 +28,7 @@ const PER_PAGE = 20;
 
 type StatusFilter = 'all' | 'active' | 'reversed';
 
-// EndSession always writes the penalty reason as "{Absent|Late} - {check
+// EndSession always writes the penalty reason as "{Missed|Late} - {check
 // label}" (see EndSession::applyPenalties) — the outcome is the only part
 // of that string worth calling out here, since the check label ("Time
 // In"/"Time Out") is already shown by the session line right next to it.
@@ -40,7 +42,9 @@ function isStatusFilter(value: string | null): value is StatusFilter {
 
 export function PenaltiesPage() {
     const { data: departments } = useDepartments();
-    const { data: events } = useEvents();
+    const [semesterSelection, setSemesterSelection] = useState<SemesterSelection>('current');
+    const semesterParam = semesterSelection === 'current' ? null : semesterSelection;
+    const { data: events } = useEvents(semesterParam);
 
     // The dashboard's "Total penalty balance" card links here with
     // ?status=active (that total excludes reversed penalties — see
@@ -61,6 +65,7 @@ export function PenaltiesPage() {
         departmentId: departmentFilter !== 'all' ? Number(departmentFilter) : undefined,
         eventId: eventFilter !== 'all' ? Number(eventFilter) : undefined,
         status: statusFilter,
+        semester: semesterParam,
         page,
         perPage: PER_PAGE,
     });
@@ -125,6 +130,17 @@ export function PenaltiesPage() {
                     grid wrapper on larger screens so `sm:flex sm:flex-wrap`
                     on the parent lays every control out inline again. */}
                 <div className="space-y-2 sm:flex sm:flex-wrap sm:items-start sm:gap-2 sm:space-y-0">
+                    <SemesterPicker
+                        value={semesterSelection}
+                        onChange={(value) => {
+                            setSemesterSelection(value);
+                            // The event list belongs to the previous semester.
+                            setEventFilter('all');
+                            setPage(1);
+                        }}
+                        allowAll
+                        className="w-full sm:w-64"
+                    />
                     <Input
                         placeholder="Search by ID or name…"
                         value={search}
@@ -208,7 +224,7 @@ export function PenaltiesPage() {
                                 of cramming into one row; from `sm` up they sit
                                 inline, right-aligned next to the total. */}
                             <div className="grid grid-cols-3 gap-2 sm:flex sm:gap-2">
-                                <StatTile size="sm" label="Absent" value={ledgerPage.summary.absentCount} Icon={XCircle} tone="red" />
+                                <StatTile size="sm" label="Missed" value={ledgerPage.summary.absentCount} Icon={XCircle} tone="red" />
                                 <StatTile size="sm" label="Late" value={ledgerPage.summary.lateCount} Icon={Clock} tone="amber" />
                                 <StatTile size="sm" label="Penalties" value={ledgerPage.summary.count} Icon={Wallet} tone="neutral" />
                             </div>
@@ -221,8 +237,33 @@ export function PenaltiesPage() {
                     <Text variant="small">No penalties match these filters.</Text>
                 )}
 
-                {ledgerPage?.data.map((row) => (
-                    <Card key={row.id} className="overflow-hidden">
+                {ledgerPage?.data.map((row, index, rows) => {
+                    // "All semesters": the server keeps each semester's rows
+                    // together, so a heading (with that semester's own
+                    // subtotal, never blended into another's) goes above the
+                    // first row of each run.
+                    const startsSemester =
+                        semesterSelection === 'all' &&
+                        (index === 0 || rows[index - 1].semesterId !== row.semesterId);
+                    const semesterTotals = startsSemester
+                        ? ledgerPage?.summary.bySemester?.find((group) => group.semesterId === row.semesterId)
+                        : undefined;
+
+                    return (
+                    <Fragment key={row.id}>
+                    {startsSemester && (
+                        <SemesterGroupHeading
+                            semesterName={semesterTotals?.semesterName ?? null}
+                            academicYearName={semesterTotals?.academicYearName ?? null}
+                            isCurrent={semesterTotals?.isCurrent ?? false}
+                            summary={
+                                semesterTotals
+                                    ? `${formatCurrency(semesterTotals.total)} · ${semesterTotals.count} penalties · ${semesterTotals.absentCount} missed · ${semesterTotals.lateCount} late`
+                                    : ''
+                            }
+                        />
+                    )}
+                    <Card className="overflow-hidden">
                         {reversingId === row.id ? (
                             <CardContent>
                                 <form onSubmit={(e) => handleReverseSubmit(e, row)} className="space-y-4">
@@ -301,8 +342,8 @@ export function PenaltiesPage() {
                                         {WINDOW_TYPE_LABEL[row.windowType]} · {CHECK_TYPE_LABEL[row.checkType]}
                                     </Text>
                                     {/* The session already conveys check type ("Morning · Time
-                                        In"), so the badge only needs the outcome (Absent/Late) —
-                                        stated plainly as "Absent - Time In" it just repeated
+                                        In"), so the badge only needs the outcome (Missed/Late) —
+                                        stated plainly as "Missed - Time In" it just repeated
                                         "Time In" a second time right below the line that already
                                         said it. */}
                                     <Badge
@@ -341,7 +382,9 @@ export function PenaltiesPage() {
                             </CardContent>
                         )}
                     </Card>
-                ))}
+                    </Fragment>
+                    );
+                })}
 
                 {ledgerPage && ledgerPage.lastPage > 1 && (
                     <div className="flex items-center justify-between pt-2">

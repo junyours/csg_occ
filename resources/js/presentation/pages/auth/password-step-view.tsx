@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react';
 import { ShieldAlert } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -59,6 +60,15 @@ export function PasswordStepView({
                         onChange={(event) => onPasswordChange(event.target.value)}
                         required
                     />
+                    <div className="flex justify-end">
+                        <Link
+                            to="/forgot-password"
+                            state={{ studentNumber: account.studentNumber }}
+                            className="text-small text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                        >
+                            Forgot password?
+                        </Link>
+                    </div>
                 </div>
 
                 {/*

@@ -8,6 +8,7 @@ use App\Models\AttendanceSession;
 use App\Models\Department;
 use App\Models\EventDay;
 use App\Models\EventModel;
+use App\Models\Semester;
 use App\Models\Student;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -121,7 +122,7 @@ it('filters by event and by status', function () {
 
     $present = historyRecord(historyStudent('2020400005'), historySession($eventOne), $officer, ['status' => 'present']);
     historyRecord(historyStudent('2020400006'), historySession($eventOne), $officer, ['status' => 'late']);
-    historyRecord(historyStudent('2020400007'), historySession($eventTwo), $officer, ['status' => 'absent']);
+    historyRecord(historyStudent('2020400007'), historySession($eventTwo), $officer, ['status' => 'missed']);
 
     $eventOneOnly = (new BuildAttendanceHistory)(['event_id' => $eventOne->id]);
     $presentOnly = (new BuildAttendanceHistory)(['status' => 'present']);
@@ -181,8 +182,42 @@ it('carries the student photo url so the ledger can render a real avatar', funct
     $rows = collect((new BuildAttendanceHistory)([])->items())->keyBy('student_number');
 
     expect($rows['2020400050']['photo_url'])->toBe('/storage/photos/2020400050.jpg')
-        // Null rather than absent — UserAvatar keys its initials fallback
+        // Null rather than missed — UserAvatar keys its initials fallback
         // off this being null, so the field has to be present either way.
         ->and($rows['2020400051'])->toHaveKey('photo_url')
         ->and($rows['2020400051']['photo_url'])->toBeNull();
+});
+
+it('keeps each semester together, newest first, and totals them separately for all semesters', function () {
+    $officer = historyOfficer();
+    $first = seedActiveSemester('semester_1');
+    $second = Semester::create([
+        'academic_year_id' => $first->academic_year_id, 'name' => 'semester_2',
+        'is_active' => false, 'created_by' => $officer->id,
+    ]);
+
+    $oldEvent = EventModel::create(['name' => 'Old', 'created_by' => $officer->id, 'semester_id' => $first->id]);
+    $newEvent = EventModel::create(['name' => 'New', 'created_by' => $officer->id, 'semester_id' => $second->id]);
+    $oldSession = historySession($oldEvent);
+    $newSession = historySession($newEvent);
+
+    historyRecord(historyStudent('2020400201'), $oldSession, $officer);
+    historyRecord(historyStudent('2020400202'), $newSession, $officer);
+    historyRecord(historyStudent('2020400203'), $newSession, $officer, ['status' => 'late']);
+
+    $action = new BuildAttendanceHistory;
+    $semesterIds = collect($action(['scope' => 'all'])->items())->pluck('semester_id')->all();
+    $summary = $action->semesterSummary(['scope' => 'all']);
+
+    expect($semesterIds)->toBe([$second->id, $second->id, $first->id])
+        ->and($summary)->toHaveCount(2)
+        ->and($summary[0]['semester_id'])->toBe($second->id)
+        ->and($summary[0]['count'])->toBe(2)
+        ->and($summary[0]['present'])->toBe(1)
+        ->and($summary[0]['late'])->toBe(1)
+        ->and($summary[0]['is_current'])->toBeFalse()
+        ->and($summary[1]['semester_id'])->toBe($first->id)
+        ->and($summary[1]['count'])->toBe(1)
+        ->and($summary[1]['is_current'])->toBeTrue()
+        ->and($summary[1]['academic_year_name'])->toBe('2026-2027');
 });

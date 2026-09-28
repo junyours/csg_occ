@@ -7,8 +7,10 @@ use App\Domain\Enums\SessionStatus;
 use App\Domain\Exceptions\EventAlreadyEndedException;
 use App\Domain\Exceptions\EventHasOngoingSessionException;
 use App\Domain\Exceptions\SessionNotScheduledException;
+use App\Domain\Exceptions\SessionStartTooEarlyException;
 use App\Models\AttendanceSession;
 use App\Models\EventModel;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
 final class StartSession
@@ -30,6 +32,14 @@ final class StartSession
      *
      * @throws SessionNotScheduledException if the session is already
      *         ongoing or has already ended.
+     * @throws SessionStartTooEarlyException if the session's scheduled
+     *         start time (its event day's date + start_time) hasn't been
+     *         reached yet according to this application server's clock —
+     *         never the caller's. This is what actually prevents an admin
+     *         from starting a session early (and thereby marking on-time
+     *         scans Late) no matter what their device's clock claims; the
+     *         frontend's disabled Start button is only a courtesy on top
+     *         of this.
      * @throws EventAlreadyEndedException if the session's parent event has
      *         already been ended by CSG — see App\Application\Actions\Events\EndEvent.
      *         A session left `scheduled` when its event ended is never
@@ -47,6 +57,19 @@ final class StartSession
 
             if ($locked->status !== SessionStatus::Scheduled) {
                 throw new SessionNotScheduledException;
+            }
+
+            // Server-clock gate — see SessionStartTooEarlyException's
+            // docblock. Carbon::now() is this application server's system
+            // time, not anything supplied by the request, so a device
+            // clock set back can't force this past.
+            $startsAt = $locked->window()->start();
+
+            if (Carbon::now()->lessThan($startsAt)) {
+                throw new SessionStartTooEarlyException(sprintf(
+                    'This session cannot be started yet — it is scheduled to start at %s.',
+                    $startsAt->format('g:i A'),
+                ));
             }
 
             $eventId = $locked->eventDay->event_id;

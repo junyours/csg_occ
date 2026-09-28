@@ -75,7 +75,7 @@ class EventModel extends Model
     /**
      * Whether a student in $departmentId should ever be tracked for this
      * event at all — the single source of truth every other check
-     * (scanning, EndSession's absent sweep, roster/report building)
+     * (scanning, EndSession's missed sweep, roster/report building)
      * defers to, so "which departments is this event for" only has to be
      * answered in one place.
      */

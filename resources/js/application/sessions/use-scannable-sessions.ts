@@ -26,7 +26,7 @@ export interface ScannableSession {
 export function useScannableSessions() {
     const { data: events, isLoading } = useQuery({
         queryKey: EVENTS_QUERY_KEY,
-        queryFn: httpEventsRepository.list,
+        queryFn: () => httpEventsRepository.list(),
     });
 
     const sessions: ScannableSession[] = (events ?? []).flatMap((event) =>

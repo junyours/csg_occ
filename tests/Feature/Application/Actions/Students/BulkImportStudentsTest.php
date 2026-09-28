@@ -9,6 +9,9 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
+// Nobody can be previewed/imported without an active semester.
+beforeEach(fn () => seedActiveSemester());
+
 function bulkImportDept(string $code): Department
 {
     return Department::firstOrCreate(['code' => $code], ['name' => $code]);
@@ -157,23 +160,64 @@ it('flags a duplicate student number across two files in the same batch, keeping
         ->and($report['errors'][0]['reasons'])->toContain('Duplicate student ID within this batch');
 });
 
-it('flags a student number that already exists in the database', function () {
+it('updates and re-activates an existing student, keeping role and name, and reports the move', function () {
+    $bsit = bulkImportDept('BSIT');
+    bulkImportDept('BEED');
+    $actor = bulkImportActor('csg_admin');
+    $existing = Student::create([
+        'student_number' => '2023000001', 'last_name' => 'Old', 'first_name' => 'Name',
+        'department_id' => $bsit->id, 'year_level' => '2', 'section' => '2A',
+        'username' => 'existing', 'password' => 'password', 'role' => 'officer', 'status' => 'inactive',
+    ]);
+
+    $file = bulkImportFile('BEED-1A.csv', [['2023000001', 'New', 'Person', '', '']]);
+
+    $preview = (new BulkImportStudents)->preview([$file], $actor);
+    expect($preview['updated'])->toBe(1)
+        ->and($preview['files'][0]['rows'][0]['action'])->toBe('update')
+        ->and($preview['files'][0]['rows'][0]['change'])->toBe('BSIT-2A → BEED-1A');
+
+    $report = (new BulkImportStudents)([bulkImportFile('BEED-1A.csv', [['2023000001', 'New', 'Person', '', '']])], $actor);
+
+    $fresh = $existing->fresh();
+    expect($report['updated'])->toBe(1)->and($report['created'])->toBe(0)
+        ->and($fresh->status)->toBe('active')
+        ->and($fresh->department->code)->toBe('BEED')
+        ->and($fresh->role->value)->toBe('officer')
+        ->and($fresh->last_name)->toBe('Old');
+});
+
+it('skips a student already enrolled and active in the current semester', function () {
+    $bsit = bulkImportDept('BSIT');
+    $actor = bulkImportActor('csg_admin');
+    (new BulkImportStudents)([bulkImportFile('BSIT-1A.csv', [['2023000001', 'Cruz', 'Juan', '', '']])], $actor);
+
+    $report = (new BulkImportStudents)([bulkImportFile('BSIT-1A.csv', [['2023000001', 'Cruz', 'Juan', '', '']])], $actor);
+
+    expect($report['skipped'])->toBe(1)->and($report['imported'])->toBe(0)->and($report['failed'])->toBe(0);
+});
+
+it('refuses to touch a System Admin row', function () {
     $bsit = bulkImportDept('BSIT');
     $actor = bulkImportActor('csg_admin');
     Student::create([
-        'student_number' => '2023000001', 'last_name' => 'Existing', 'first_name' => 'Student',
-        'department_id' => $bsit->id, 'username' => 'existing', 'password' => 'password',
+        'student_number' => '2023000001', 'last_name' => 'Root', 'first_name' => 'Admin',
+        'department_id' => $bsit->id, 'username' => 'root', 'password' => 'password', 'role' => 'system_admin',
     ]);
 
-    $file = bulkImportFile('BSIT-1A.csv', [
-        ['2023000001', 'Cruz', 'Juan', 'Dela', ''],
-    ]);
-
-    $report = (new BulkImportStudents)([$file], $actor);
+    $report = (new BulkImportStudents)([bulkImportFile('BSIT-1A.csv', [['2023000001', 'Cruz', 'Juan', '', '']])], $actor);
 
     expect($report['failed'])->toBe(1)
-        ->and($report['errors'][0]['reasons'])->toContain('Student ID already exists');
+        ->and($report['errors'][0]['reasons'])->toContain('System Admin account cannot be imported/changed here');
 });
+
+it('refuses to import without an active semester', function () {
+    \App\Models\Semester::query()->update(['is_active' => false]);
+    bulkImportDept('BSIT');
+    $actor = bulkImportActor('csg_admin');
+
+    (new BulkImportStudents)([bulkImportFile('BSIT-1A.csv', [['2023000001', 'Cruz', 'Juan', '', '']])], $actor);
+})->throws(\App\Domain\Exceptions\NoActiveSemesterException::class);
 
 it('lets a csg admin import across multiple departments in one batch', function () {
     bulkImportDept('BSIT');

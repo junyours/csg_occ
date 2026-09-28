@@ -9,7 +9,7 @@ class AcademicYearPolicy
 {
     /**
      * Every authenticated account needs the academic year list — it's how
-     * every dashboard (present/absent/late/penalties/events/students)
+     * every dashboard (present/missed/late/penalties/events/students)
      * scopes itself, and how a student's own history is grouped. Viewing
      * isn't restricted, only management is.
      */
@@ -18,13 +18,10 @@ class AcademicYearPolicy
         return true;
     }
 
-    /**
-     * Creating, editing, activating, and deactivating academic years is a
-     * CSG-level power — same tier as departments and events (spec §2/§3/§6).
-     */
+    /** Managing academic years (incl. activate/deactivate) is System Admin only. */
     public function create(Student $user): bool
     {
-        return in_array($user->role, [Role::SystemAdmin, Role::CsgAdmin], true);
+        return $user->role === Role::SystemAdmin;
     }
 
     public function update(Student $user): bool

@@ -16,6 +16,7 @@ export function useSetAcademicYearActive() {
             active ? httpAcademicYearsRepository.activate(id) : httpAcademicYearsRepository.deactivate(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ACADEMIC_YEARS_QUERY_KEY });
+            queryClient.invalidateQueries();
         },
     });
 }

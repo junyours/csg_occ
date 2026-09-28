@@ -15,7 +15,7 @@ final class TimeWindow
 
     /**
      * Classify a scan timestamp against this window.
-     * Only ever returns Present or Late — Absent is decided
+     * Only ever returns Present or Late — Missed is decided
      * separately, at session-end, for students with no scan at all.
      */
     public function classify(Carbon $scannedAt): AttendanceStatus
@@ -32,5 +32,16 @@ final class TimeWindow
     public function graceEnd(): Carbon
     {
         return $this->end->copy()->addMinutes($this->graceMinutes);
+    }
+
+    /**
+     * The session's scheduled start instant (event day's date + start_time,
+     * already combined — see AttendanceSession::combineWithDate()). Used by
+     * StartSession and ScanAttendance to gate against the *server* clock,
+     * never a client-supplied timestamp.
+     */
+    public function start(): Carbon
+    {
+        return $this->start->copy();
     }
 }

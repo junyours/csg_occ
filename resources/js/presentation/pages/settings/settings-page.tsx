@@ -1,4 +1,4 @@
-import { Building2, CalendarDays, CalendarRange, ClipboardList, FileBarChart, Receipt, Users } from 'lucide-react';
+import { Building2, CalendarDays, CalendarRange, ClipboardList, FileBarChart, KeyRound, Receipt, Users } from 'lucide-react';
 
 import { useAuthStore } from '@/application/auth/auth.store';
 import { Role } from '@/domain/enums';
@@ -7,9 +7,9 @@ import { SettingsRow } from '@/presentation/components/settings-row';
 
 const MANAGE_ROLES: Role[] = [Role.SystemAdmin, Role.CsgAdmin, Role.ScAdmin];
 const EVENTS_ROLES: Role[] = [Role.SystemAdmin, Role.CsgAdmin];
-// Academic years are a CSG-level power (spec §2/§3/§6 tier), not extended
-// to SC Admin the way the student roster and reports are.
-const ACADEMIC_YEAR_ROLES: Role[] = [Role.SystemAdmin, Role.CsgAdmin];
+// Academic years and semesters (incl. the rollover Activate/Deactivate) are
+// System Admin only — AcademicYearPolicy / SemesterPolicy mirror this.
+const ACADEMIC_YEAR_ROLES: Role[] = [Role.SystemAdmin];
 // Departments (courses) are the same CSG-level tier as academic years —
 // DepartmentPolicy::create/update/updateLogo all gate on this same pair.
 const DEPARTMENT_ROLES: Role[] = [Role.SystemAdmin, Role.CsgAdmin];
@@ -61,6 +61,13 @@ export function SettingsPage() {
                                 Admin) — see AttendanceSessionPolicy. */}
                             <SettingsRow to="/attendance-history" tone="emerald" icon={<ClipboardList className="size-5" />}>
                                 Attendance History
+                            </SettingsRow>
+                            {/* Same three admin tiers as above; which codes
+                                each one actually sees is narrowed by role
+                                rank and department on the backend — see
+                                BuildPasswordResetCodeList. */}
+                            <SettingsRow to="/password-reset-codes" tone="amber" icon={<KeyRound className="size-5" />}>
+                                Password Reset Codes
                             </SettingsRow>
                         </>
                     )}

@@ -86,7 +86,7 @@ const STATUS_STYLE: Record<
         icon: 'text-amber-500',
         label: 'Late',
     },
-    [AttendanceStatus.Absent]: {
+    [AttendanceStatus.Missed]: {
         Icon: XCircle,
         chip: 'border-2 border-red-300/70 bg-transparent text-red-400 dark:border-red-900 dark:text-red-500/80',
         icon: 'text-red-400 dark:text-red-500/80',

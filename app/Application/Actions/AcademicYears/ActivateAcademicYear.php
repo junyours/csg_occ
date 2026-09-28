@@ -2,7 +2,9 @@
 
 namespace App\Application\Actions\AcademicYears;
 
+use App\Domain\Exceptions\SemesterStillActiveException;
 use App\Models\AcademicYear;
+use App\Models\Semester;
 use Illuminate\Support\Facades\DB;
 
 final class ActivateAcademicYear
@@ -15,6 +17,11 @@ final class ActivateAcademicYear
     public function __invoke(AcademicYear $academicYear): AcademicYear
     {
         return DB::transaction(function () use ($academicYear) {
+            // Never switch the year out from under a running semester.
+            if (Semester::active()->exists()) {
+                throw new SemesterStillActiveException;
+            }
+
             AcademicYear::where('id', '!=', $academicYear->id)
                 ->where('is_active', true)
                 ->update(['is_active' => false]);

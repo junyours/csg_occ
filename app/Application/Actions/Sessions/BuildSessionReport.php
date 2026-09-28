@@ -2,23 +2,23 @@
 
 namespace App\Application\Actions\Sessions;
 
-use App\Domain\Enums\Role;
+use App\Domain\Support\CurrentSemester;
+use App\Domain\Support\ReportRoster;
 use App\Models\AttendancePenalty;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\Exclusion;
-use App\Models\Student;
 
 final class BuildSessionReport
 {
     /**
      * Spec §10 (GET /sessions/{id}/report) and §8's note that exclusions
-     * "should also visibly say 'Excluded' rather than 'Absent' in
+     * "should also visibly say 'Excluded' rather than 'Missed' in
      * reports". Every role=student account in scope gets a row — even one
      * with no attendance_records row at all, which happens whenever the
      * session hasn't been ended yet. That row is reported with a null
-     * status (still pending), never guessed at as Absent — only
-     * EndSession is allowed to actually decide Absent.
+     * status (still pending), never guessed at as Missed — only
+     * EndSession is allowed to actually decide Missed.
      *
      * @param  int|null  $departmentId  When given (an SC Admin's own
      *                                  department), the roster and every
@@ -36,12 +36,9 @@ final class BuildSessionReport
         // perpetually-pending row either.
         $includedDepartmentIds = $session->eventDay->event->includedDepartmentIds();
 
-        $roster = Student::where('role', Role::Student)
-            ->whereIn('department_id', $includedDepartmentIds)
-            ->when($departmentId, fn ($q) => $q->where('department_id', $departmentId))
-            ->with('department')
-            ->orderBy('last_name')->orderBy('first_name')
-            ->get();
+        $roster = CurrentSemester::usesLiveRoster($session->eventDay->event->semester_id)
+            ? ReportRoster::live([$session->id], $includedDepartmentIds, $departmentId)
+            : ReportRoster::historical([$session->id], $departmentId);
 
         $records = AttendanceRecord::where('session_id', $session->id)
             ->whereIn('student_id', $roster->pluck('id'))
@@ -55,7 +52,7 @@ final class BuildSessionReport
             ->groupBy('student_id')
             ->map(fn ($penalties) => (float) $penalties->sum('amount'));
 
-        $summary = ['present' => 0, 'late' => 0, 'absent' => 0, 'excluded' => 0, 'pending' => 0, 'penalty_total' => 0.0];
+        $summary = ['present' => 0, 'late' => 0, 'missed' => 0, 'excluded' => 0, 'pending' => 0, 'penalty_total' => 0.0];
         $students = [];
 
         foreach ($roster as $student) {
@@ -65,7 +62,7 @@ final class BuildSessionReport
             // A real record always wins over the exclusion flag: it can
             // only exist here because the student genuinely scanned
             // before being excluded (student-exclusion-feature-plan.md
-            // §2 rule 4's "mid-window guard") — that Present/Late/Absent
+            // §2 rule 4's "mid-window guard") — that Present/Late/Missed
             // outcome is not rewritten to "Excluded" after the fact.
             [$status, $scannedAt] = match (true) {
                 $record !== null => [$record->status->value, $record->scanned_at],
@@ -88,6 +85,7 @@ final class BuildSessionReport
                 'section' => $student->section,
                 'status' => $status,
                 'scanned_at' => $scannedAt,
+                'auto_present' => (bool) $record?->auto_present,
                 'penalty_amount' => $penaltyAmount,
             ];
         }

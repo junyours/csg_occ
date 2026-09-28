@@ -1,7 +1,17 @@
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, type MouseEvent, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +24,7 @@ import { useUpdateSemester } from '@/application/semesters/use-update-semester';
 import { useSetSemesterActive } from '@/application/semesters/use-set-semester-active';
 import type { Semester } from '@/domain/entities';
 import { Semester as SemesterTerm, SEMESTER_LABEL } from '@/domain/enums';
-import { cn, formatDate } from '@/lib/utils';
+import { apiErrorMessage, cn, formatDate } from '@/lib/utils';
 import { Text } from '@/presentation/components/typography';
 import { TONE } from '@/presentation/components/tone';
 
@@ -55,6 +65,8 @@ export function SemesterSection({ academicYearId, canManage }: { academicYearId:
     const createSemester = useCreateSemester(academicYearId);
     const updateSemester = useUpdateSemester(academicYearId);
     const setActive = useSetSemesterActive(academicYearId);
+    // Deactivation runs the rollover sweep, so it always asks first.
+    const [confirmingDeactivate, setConfirmingDeactivate] = useState<Semester | null>(null);
 
     function startEditing(semester: Semester) {
         setEditingId(semester.id);
@@ -78,8 +90,8 @@ export function SemesterSection({ academicYearId, canManage }: { academicYearId:
                     setCreateForm(EMPTY_CREATE_FORM);
                     setIsCreating(false);
                 },
-                onError: () => {
-                    toast.error("Could not create semester. Check the name isn't already used in this year.");
+                onError: (error) => {
+                    toast.error(apiErrorMessage(error, "Could not create semester. Check the name isn't already used in this year."));
                 },
             },
         );
@@ -100,25 +112,46 @@ export function SemesterSection({ academicYearId, canManage }: { academicYearId:
                     toast.success('Semester updated.');
                     setEditingId(null);
                 },
-                onError: () => {
-                    toast.error('Could not update semester.');
+                onError: (error) => {
+                    toast.error(apiErrorMessage(error, 'Could not update semester.'));
+                },
+            },
+        );
+    }
+
+    function toggleActive(semester: Semester) {
+        setActive.mutate(
+            { id: semester.id, active: !semester.isActive },
+            {
+                onSuccess: () => {
+                    toast.success(
+                        semester.isActive
+                            ? 'Semester deactivated. Roles were reset and accounts set inactive.'
+                            : 'Semester activated.',
+                    );
+                    setConfirmingDeactivate(null);
+                },
+                // Surfaces the server's rule: ongoing events (named), another
+                // semester still active, or the academic year not being active.
+                onError: (error) => {
+                    toast.error(apiErrorMessage(error, 'Could not update the active semester.'));
+                    setConfirmingDeactivate(null);
                 },
             },
         );
     }
 
     function handleToggleActive(semester: Semester) {
-        setActive.mutate(
-            { id: semester.id, active: !semester.isActive },
-            {
-                onSuccess: () => {
-                    toast.success(semester.isActive ? `${semester.name} deactivated.` : `${semester.name} activated.`);
-                },
-                onError: () => {
-                    toast.error('Could not update the active semester.');
-                },
-            },
-        );
+        if (semester.isActive) {
+            setConfirmingDeactivate(semester);
+            return;
+        }
+        toggleActive(semester);
+    }
+
+    function handleDeactivateConfirmed(event: MouseEvent) {
+        event.preventDefault();
+        if (confirmingDeactivate) toggleActive(confirmingDeactivate);
     }
 
     return (
@@ -320,6 +353,29 @@ export function SemesterSection({ academicYearId, canManage }: { academicYearId:
                         ))}
                 </div>
             )}
+
+            <AlertDialog
+                open={confirmingDeactivate !== null}
+                onOpenChange={(open) => !open && !setActive.isPending && setConfirmingDeactivate(null)}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Deactivate this semester?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This ends the term for everyone. Every CSG Admin, SC Admin and Officer goes back to a regular
+                            student, every account except System Admin becomes inactive and is signed out, and
+                            students must be re-imported into the next semester. It can't be undone in one click, and
+                            it's blocked while any event is still ongoing.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={setActive.isPending}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleDeactivateConfirmed} disabled={setActive.isPending}>
+                            {setActive.isPending ? 'Deactivating…' : 'Deactivate semester'}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

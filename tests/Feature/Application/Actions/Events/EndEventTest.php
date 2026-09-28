@@ -14,9 +14,18 @@ use App\Models\Department;
 use App\Models\EventDay;
 use App\Models\EventModel;
 use App\Models\Student;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
+
+// Fixtures below use a fixed event-day date (2026-11-10) with a 07:00
+// start_time — freezing "now" comfortably after that lets the two real
+// StartSession calls below (StartSession now refuses to start a session
+// before its scheduled start time — see SessionStartTooEarlyException)
+// succeed the same way they did before that gate existed.
+beforeEach(fn () => Carbon::setTestNow(Carbon::parse('2026-11-10 23:59:00', 'Asia/Manila')));
+afterEach(fn () => Carbon::setTestNow());
 
 function endEventDept(string $code): Department
 {
@@ -31,7 +40,7 @@ function endEventCreator(): Student
             'last_name' => 'Admin', 'first_name' => 'CSG',
             'department_id' => endEventDept('CCS')->id,
             'username' => 'csgadmin', 'password' => 'password',
-            'role' => Role::CsgAdmin,
+            'role' => Role::SystemAdmin,
         ],
     );
 }

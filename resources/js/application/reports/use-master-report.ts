@@ -5,13 +5,14 @@ import { httpReportsRepository } from '@/infrastructure/reports/reports.reposito
 export const MASTER_REPORT_QUERY_KEY = ['reports', 'master'];
 
 /**
- * GET /reports/master — every event in the current active academic year
- * + semester, each with its total Present/Absent/Late/Excluded. Backs
- * the Settings → Reports landing screen (SettingsPage's "Reports" row).
+ * GET /reports/master — every event in one semester (default: the current
+ * active semester; pass a past `semesterId` to view an earlier term), each
+ * with its total Present/Missed/Late/Excluded. Backs the Settings → Reports
+ * landing screen (SettingsPage's "Reports" row).
  */
-export function useMasterReport() {
+export function useMasterReport(semesterId: number | null = null) {
     return useQuery({
-        queryKey: MASTER_REPORT_QUERY_KEY,
-        queryFn: httpReportsRepository.getMasterReport,
+        queryKey: [...MASTER_REPORT_QUERY_KEY, semesterId],
+        queryFn: () => httpReportsRepository.getMasterReport(semesterId),
     });
 }

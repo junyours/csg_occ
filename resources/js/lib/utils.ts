@@ -45,6 +45,25 @@ export function formatTimeOfDay(value: string): string {
 }
 
 /**
+ * The real instant a session's start_time falls on, given its event day's
+ * date — e.g. day "2026-11-10" + startTime "14:45:00" → 2:45 PM Asia/Manila
+ * on that date, as an absolute instant.
+ *
+ * start_time/end_time are wall-clock times in the venue's timezone, not
+ * UTC (see AttendanceSession::combineWithDate() on the backend, which this
+ * mirrors exactly). Asia/Manila's UTC+8 offset is hardcoded rather than
+ * read from the viewer's own timezone or device clock: a session's
+ * schedule is fixed to the venue, and — this is the whole point — nothing
+ * about "has this session's start time arrived yet" may depend on
+ * anything the viewer's device reports. Callers should compare the result
+ * against useTrustedNow()'s server-synced clock, never against
+ * `new Date()`/Date.now() directly.
+ */
+export function sessionStartInstant(date: string, startTime: string): Date {
+    return new Date(`${date.slice(0, 10)}T${startTime}+08:00`);
+}
+
+/**
  * Formats a real UTC instant (e.g. AttendanceRecord.scanned_at) in the
  * viewer's local time — unlike formatDate/formatTimeOfDay, this one *is*
  * a genuine timestamp, so converting to local time is correct here.
@@ -120,4 +139,11 @@ export function formatStudentNumber(raw: string): string {
     if (digits.length <= 4) return digits;
     if (digits.length <= 5) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
     return `${digits.slice(0, 4)}-${digits.slice(4, 5)}-${digits.slice(5)}`;
+}
+
+/** Server-provided `message` from a failed request (e.g. a 409 domain rule), else the fallback. */
+export function apiErrorMessage(error: unknown, fallback: string): string {
+    const message = (error as { response?: { data?: { message?: unknown } } } | null)?.response?.data?.message;
+
+    return typeof message === 'string' && message !== '' ? message : fallback;
 }

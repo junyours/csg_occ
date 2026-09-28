@@ -29,9 +29,6 @@ class StoreSemesterRequest extends FormRequest
             ],
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
-            // Optional — creating one as active is a shortcut for
-            // create-then-activate, not a separate ability.
-            'is_active' => ['sometimes', 'boolean'],
         ];
     }
 }

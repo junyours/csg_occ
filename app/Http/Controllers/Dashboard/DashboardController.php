@@ -16,6 +16,17 @@ class DashboardController extends Controller
      */
     public function show(Request $request, BuildDashboardSummary $buildDashboardSummary)
     {
-        return response()->json($buildDashboardSummary($request->user()));
+        // Omitted = current semester; `semester_id`; or `scope=all`.
+        // Students are forced to the current semester inside the action.
+        $filters = $request->validate([
+            'semester_id' => ['nullable', 'integer', 'exists:semesters,id'],
+            'scope' => ['nullable', 'string', 'in:all'],
+        ]);
+
+        return response()->json($buildDashboardSummary(
+            $request->user(),
+            isset($filters['semester_id']) ? (int) $filters['semester_id'] : null,
+            ($filters['scope'] ?? null) === 'all',
+        ));
     }
 }

@@ -20,15 +20,30 @@ export const useAuthStore = create<AuthState>()(
         }),
         {
             name: 'occ-csg-auth',
-            // Was the zustand/persist default (localStorage), which keeps
-            // the bearer token on disk indefinitely — readable by any
-            // script on the page, forever, even after the browser is
-            // closed and reopened days later. sessionStorage still isn't
-            // XSS-proof (nothing client-side-only is), but it at least
-            // dies with the tab/browser session instead of outliving it,
-            // which matches the 12h server-side token expiry now set in
-            // config/sanctum.php rather than undermining it.
-            storage: createJSONStorage(() => sessionStorage),
+            // localStorage, so the login is shared by every tab of this
+            // browser — like any normal site. Opening csg.occph.com in a
+            // new tab lands straight on the dashboard (see GuestRoute),
+            // and only one account can be signed in per browser at a time.
+            // It used to be sessionStorage, which is private to each tab:
+            // a new tab looked signed out and could sign into a different
+            // account alongside the first.
+            //
+            // A token that has outlived the server-side 12h expiry is
+            // harmless: the first API call answers 401 and the http
+            // client clears this store (see infrastructure/http/client.ts).
+            storage: createJSONStorage(() => localStorage),
         },
     ),
 );
+
+// localStorage is shared, but each tab keeps its own in-memory copy of the
+// store. Without this, signing in or out in one tab leaves the others showing
+// the old state until they reload. The `storage` event fires in every OTHER
+// tab when this key changes, so they re-read it and follow along.
+if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (event) => {
+        if (event.key === 'occ-csg-auth') {
+            void useAuthStore.persist.rehydrate();
+        }
+    });
+}

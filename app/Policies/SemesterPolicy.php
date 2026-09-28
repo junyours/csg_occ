@@ -22,14 +22,10 @@ class SemesterPolicy
         return true;
     }
 
-    /**
-     * Creating, editing, activating, and deactivating semesters is a
-     * CSG-level power — same tier as academic years, departments, and
-     * events.
-     */
+    /** Managing semesters (incl. activate/deactivate) is System Admin only. */
     public function create(Student $user): bool
     {
-        return in_array($user->role, [Role::SystemAdmin, Role::CsgAdmin], true);
+        return $user->role === Role::SystemAdmin;
     }
 
     public function update(Student $user): bool

@@ -3,6 +3,7 @@
 namespace App\Application\Actions\Departments;
 
 use App\Domain\Exceptions\DepartmentHasStudentsException;
+use App\Models\AttendanceRecord;
 use App\Models\Department;
 use App\Models\Student;
 use Illuminate\Support\Facades\Log;
@@ -26,7 +27,9 @@ final class DeleteDepartment
             ->orWhere('sc_admin_department_id', $department->id)
             ->exists();
 
-        if ($hasStudents) {
+        $hasRecords = AttendanceRecord::where('department_id', $department->id)->exists();
+
+        if ($hasStudents || $hasRecords) {
             throw new DepartmentHasStudentsException;
         }
 

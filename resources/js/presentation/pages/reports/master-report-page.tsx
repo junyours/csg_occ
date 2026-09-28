@@ -25,8 +25,9 @@ import { Separator } from '@/components/ui/separator';
 import { useAuthStore } from '@/application/auth/auth.store';
 import { useDepartments } from '@/application/departments/use-departments';
 import { useMasterReport } from '@/application/reports/use-master-report';
+import { SemesterPicker, type SemesterSelection } from '@/presentation/components/semester-picker';
 import { useMasterReportGeneration } from '@/application/reports/use-master-report-generation';
-import { EVENT_STATUS_BADGE_CLASS, EVENT_STATUS_LABEL, Role } from '@/domain/enums';
+import { EVENT_STATUS_BADGE_CLASS, EVENT_STATUS_LABEL, Role, semesterLabel } from '@/domain/enums';
 import { Heading, Text } from '@/presentation/components/typography';
 import { StatTile } from '@/presentation/components/tile';
 import type { Tone } from '@/presentation/components/tone';
@@ -38,17 +39,19 @@ const REPORT_ROLES: Role[] = [Role.SystemAdmin, Role.CsgAdmin, Role.ScAdmin];
 // Same status→tile language as the dashboard/attendance history, so an
 // event card here reads the same way those do rather than inventing its
 // own bordered mini-box style.
-const EVENT_STAT_CONFIG: { key: 'present' | 'late' | 'absent' | 'excluded'; label: string; tone: Tone; Icon: LucideIcon }[] = [
+const EVENT_STAT_CONFIG: { key: 'present' | 'late' | 'missed' | 'excluded'; label: string; tone: Tone; Icon: LucideIcon }[] = [
     { key: 'present', label: 'Present', tone: 'emerald', Icon: CheckCircle2 },
     { key: 'late', label: 'Late', tone: 'amber', Icon: Clock },
-    { key: 'absent', label: 'Absent', tone: 'red', Icon: XCircle },
+    { key: 'missed', label: 'Missed', tone: 'red', Icon: XCircle },
     { key: 'excluded', label: 'Excluded', tone: 'neutral', Icon: MinusCircle },
 ];
 
 export function MasterReportPage() {
     const navigate = useNavigate();
     const student = useAuthStore((state) => state.student);
-    const { data, isLoading, isError } = useMasterReport();
+    // Current semester by default; a past one is a read-only look-back.
+    const [semesterSelection, setSemesterSelection] = useState<SemesterSelection>('current');
+    const { data, isLoading, isError } = useMasterReport(typeof semesterSelection === 'number' ? semesterSelection : null);
     const { data: departments } = useDepartments();
 
     // Order matters here — it's what decides the left-to-right column
@@ -114,11 +117,20 @@ export function MasterReportPage() {
                 <div>
                     <Heading level="h1">Reports</Heading>
                     <Text variant="small">
-                        Every event in the current academic year and semester, with total attendance. Select two or
-                        more events below to combine them into one master report.
+                        Every event in the chosen semester (the current one by default), with total attendance.
+                        Select two or more events below to combine them into one master report.
                     </Text>
                 </div>
             </div>
+
+            <SemesterPicker
+                value={semesterSelection}
+                onChange={(next) => {
+                    setSemesterSelection(next === 'all' ? 'current' : next);
+                    // Selected events belong to the previous semester's list.
+                    setSelectedEventIds([]);
+                }}
+            />
 
             <Separator />
 
@@ -143,7 +155,7 @@ export function MasterReportPage() {
                 <>
                     <div>
                         <Text variant="small" className="text-muted-foreground">
-                            {data.academic_year?.name} — {data.semester.name}
+                            {data.academic_year?.name} — {semesterLabel(data.semester.name)}
                         </Text>
                     </div>
 

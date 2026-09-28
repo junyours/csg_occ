@@ -28,7 +28,8 @@ class StoreStudentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'student_number' => ['required', 'string', 'max:50', 'unique:students,student_number'],
+            // No `unique`: an existing number is handled in the controller (update mode).
+            'student_number' => ['required', 'string', 'max:50'],
             'last_name' => ['required', 'string', 'max:255'],
             'first_name' => ['required', 'string', 'max:255'],
             'middle_name' => ['required', 'string', 'max:255'],
@@ -42,10 +43,7 @@ class StoreStudentRequest extends FormRequest
             'year_level' => ['required', 'string', 'max:20'],
             'section' => ['nullable', 'string', 'max:50'],
             'date_enrolled' => ['nullable', 'date'],
-            // Optional — CreateStudent defaults to the active semester
-            // when omitted, so callers only need this to enroll a
-            // student into a specific (e.g. non-active) semester.
-            'semester_id' => ['nullable', 'integer', 'exists:semesters,id'],
+            'update_existing' => ['sometimes', 'boolean'],
         ];
     }
 }

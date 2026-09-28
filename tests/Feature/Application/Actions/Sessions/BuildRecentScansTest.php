@@ -136,7 +136,7 @@ it('drops a reversed scan out of the list', function () {
     expect((new BuildRecentScans)($session)->pluck('student_id')->all())->toBe([$kept->id]);
 });
 
-it('hides the absent rows a closing session backfills', function () {
+it('hides the missed rows a closing session backfills', function () {
     // EndSession writes an AttendanceRecord per no-show with a null
     // scanned_at. Those are records, but nobody scanned them — without
     // the whereNotNull guard they'd bury the actual scans.
@@ -151,7 +151,7 @@ it('hides the absent rows a closing session backfills', function () {
         'session_id' => $session->id,
         'student_id' => $noShow->id,
         'scanned_at' => null,
-        'status' => AttendanceStatus::Absent,
+        'status' => AttendanceStatus::Missed,
         'scanned_by' => null,
     ]);
 

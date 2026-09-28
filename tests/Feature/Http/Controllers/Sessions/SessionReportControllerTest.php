@@ -32,7 +32,7 @@ function reportApiSession(): AttendanceSession
             'last_name' => 'Admin', 'first_name' => 'CSG',
             'department_id' => $department->id,
             'username' => 'csgadmin', 'password' => 'password',
-            'role' => Role::CsgAdmin,
+            'role' => Role::SystemAdmin,
         ],
     );
 
@@ -98,7 +98,7 @@ it('rejects a student viewing a session report', function () {
 });
 
 it('lets a csg admin view a session report across every department', function () {
-    $admin = reportApiStaff('csg_admin', '2020000002');
+    $admin = reportApiStaff('system_admin', '2020000002');
     $session = reportApiSession();
     Student::create([
         'student_number' => '2023000001', 'last_name' => 'Cruz', 'first_name' => 'Juan',
@@ -131,5 +131,6 @@ it('scopes an sc admin session report to their own department', function () {
         ->assertStatus(200)
         ->assertJsonCount(1, 'students');
 
-    expect($response->json('students.0.student_number'))->toBe('2023000001');
+    expect(collect($response->json('students'))->pluck('student_number'))
+        ->toContain('2023000001')->not->toContain('2023000002');
 });

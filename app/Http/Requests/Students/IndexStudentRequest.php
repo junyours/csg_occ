@@ -24,6 +24,7 @@ class IndexStudentRequest extends FormRequest
             'major' => ['nullable', 'string', 'max:50'],
             'year_level' => ['nullable', 'string', 'max:20'],
             'section' => ['nullable', 'string', 'max:50'],
+            'status' => ['nullable', 'string', Rule::in(['active', 'inactive', 'all'])],
             // Matches against student_number, last_name, or first_name.
             'search' => ['nullable', 'string', 'max:255'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],

@@ -70,7 +70,7 @@ class Exclusion extends Model
      * the "ongoing day: excluded going forward" row in §6a's table); a
      * session whose ended_at is at/before the exclusion's created_at had
      * already closed out and is left untouched, preserving its
-     * Present/Absent/Late history.
+     * Present/Missed/Late history.
      *
      * This method is deliberately NOT what an already-ended session's
      * report reads from. Because it only ever matches status=active

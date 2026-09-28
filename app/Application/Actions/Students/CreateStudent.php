@@ -3,13 +3,15 @@
 namespace App\Application\Actions\Students;
 
 use App\Domain\ValueObjects\QrPayload;
-use App\Models\Semester;
+use App\Domain\Exceptions\NoActiveSemesterException;
+use App\Domain\Support\CurrentSemester;
 use App\Models\Student;
 use Illuminate\Support\Facades\DB;
 
 final class CreateStudent
 {
-    private const DEFAULT_PASSWORD = 'password123';
+    /** Also what an admin's "Reset password" sets (see ResetStudentPassword). */
+    public const DEFAULT_PASSWORD = 'password123';
 
     private static ?string $defaultPasswordHash = null;
 
@@ -25,22 +27,6 @@ final class CreateStudent
     private static function defaultPasswordHash(): string
     {
         return self::$defaultPasswordHash ??= \Illuminate\Support\Facades\Hash::make(self::DEFAULT_PASSWORD);
-    }
-
-    /**
-     * "Active" is scoped per academic year (a semester's is_active only
-     * retires other semesters within the same academic year — see
-     * ActivateSemester), so more than one semester could technically be
-     * flagged active across different academic years at once. The one
-     * that actually matters for defaulting a new student is the active
-     * semester *of the active academic year* — falls back to null (no
-     * default) if either isn't set up yet.
-     */
-    private static function activeSemesterId(): ?int
-    {
-        return Semester::active()
-            ->whereHas('academicYear', fn ($query) => $query->where('is_active', true))
-            ->value('id');
     }
 
     /**
@@ -61,12 +47,15 @@ final class CreateStudent
      *     year_level: string,
      *     section?: string|null,
      *     date_enrolled?: string|null,
-     *     semester_id?: int|null,
      * } $data
      */
     public function __invoke(array $data): Student
     {
-        return DB::transaction(function () use ($data) {
+        // Only ever enrolled into the active semester; none active = refuse.
+        $semesterId = CurrentSemester::id()
+            ?? throw new NoActiveSemesterException('There is no active semester to enroll students into.');
+
+        return DB::transaction(function () use ($data, $semesterId) {
             $student = Student::create([
                 'student_number' => $data['student_number'],
                 'last_name' => $data['last_name'],
@@ -78,12 +67,8 @@ final class CreateStudent
                 'year_level' => $data['year_level'],
                 'section' => $data['section'] ?? null,
                 'date_enrolled' => $data['date_enrolled'] ?? null,
-                // A student is enrolled into a semester at creation time
-                // (spec: "students to a semester") — defaults to whichever
-                // semester is currently active so callers that don't know
-                // or care about semesters (existing tests, older import
-                // rows) still get a scoped student rather than a null one.
-                'semester_id' => $data['semester_id'] ?? self::activeSemesterId(),
+                'semester_id' => $semesterId,
+                'status' => Student::STATUS_ACTIVE,
                 'username' => $data['student_number'],
                 'password' => self::defaultPasswordHash(),
                 'must_change_password' => true,

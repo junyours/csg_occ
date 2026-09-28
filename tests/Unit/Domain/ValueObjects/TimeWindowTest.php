@@ -60,8 +60,8 @@ it('classifies a scan one second past the grace-period cutoff as Late', function
         ->toBe(AttendanceStatus::Late);
 });
 
-it('classifies a scan well past the grace period as Late, not Absent', function () {
-    // Absent is never decided by TimeWindow — only by manually ending a session.
+it('classifies a scan well past the grace period as Late, not Missed', function () {
+    // Missed is never decided by TimeWindow — only by manually ending a session.
     $window = new TimeWindow(
         Carbon::parse('2026-11-10 07:00:00'),
         Carbon::parse('2026-11-10 08:00:00'),

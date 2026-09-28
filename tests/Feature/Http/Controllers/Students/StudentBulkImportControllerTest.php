@@ -7,6 +7,9 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
+// Nobody can be previewed/imported without an active semester.
+beforeEach(fn () => seedActiveSemester());
+
 function bulkImportApiDept(string $code): Department
 {
     return Department::firstOrCreate(['code' => $code], ['name' => $code]);

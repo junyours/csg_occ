@@ -158,7 +158,7 @@ export function EventRosterReportPage() {
                 <CardHeader>
                     <Heading level="h3">Generate</Heading>
                     <Text variant="small">
-                        Present, Late, Absent, and Excluded are colour-coded, with a penalty total per student and
+                        Present, Late, Missed, and Excluded are colour-coded, with a penalty total per student and
                         per group. Large exports run in the background — the bar below tracks real progress, not a
                         timer, and the file downloads automatically once it's ready.
                     </Text>

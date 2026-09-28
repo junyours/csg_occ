@@ -69,7 +69,7 @@ function ledgerPenalty(Student $student, AttendanceSession $session, array $over
         'student_id' => $student->id,
         'session_id' => $session->id,
         'amount' => 25,
-        'reason' => 'Absent - Time In',
+        'reason' => 'Missed - Time In',
     ], $overrides));
 }
 
@@ -180,7 +180,7 @@ it('carries the student photo url so the ledger can render a real avatar', funct
     // Root-relative on purpose — see Student::photoUrl for why this isn't
     // built from APP_URL.
     expect($rows['2020300050']['photo_url'])->toBe('/storage/photos/2020300050.jpg')
-        // Null rather than absent: the frontend keys its initials fallback
+        // Null rather than missed: the frontend keys its initials fallback
         // off this being null, so the field has to exist either way.
         ->and($rows['2020300051'])->toHaveKey('photo_url')
         ->and($rows['2020300051']['photo_url'])->toBeNull();

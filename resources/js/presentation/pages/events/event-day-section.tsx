@@ -28,9 +28,10 @@ import { useStartSession } from '@/application/sessions/use-start-session';
 import { useUpdateSession } from '@/application/sessions/use-update-session';
 import { useDeleteEventDay } from '@/application/events/use-delete-event-day';
 import { useUpdateEventDay } from '@/application/events/use-update-event-day';
+import { useTrustedNow } from '@/application/server-time/use-server-clock';
 import type { AttendanceSession, EventDayWithSessions } from '@/domain/entities';
 import { CHECK_TYPE_LABEL, CheckType, SESSION_STATUS_BADGE_CLASS, SessionStatus, WindowType, WINDOW_TYPE_LABEL } from '@/domain/enums';
-import { cn, formatDate } from '@/lib/utils';
+import { cn, formatDate, formatTimeOfDay, sessionStartInstant } from '@/lib/utils';
 import { Text } from '@/presentation/components/typography';
 import { Tile } from '@/presentation/components/tile';
 import { TONE, type Tone } from '@/presentation/components/tone';
@@ -141,6 +142,12 @@ export function EventDaySection({
 }) {
     const [isCreating, setIsCreating] = useState(false);
     const [form, setForm] = useState<SessionFormValues>(EMPTY_SESSION_FORM);
+    // Server-synced clock (never the device's own) — see
+    // SessionStartTooEarlyException's docblock on the backend for why: a
+    // Start button disabled by a spoofed device clock isn't a real
+    // safeguard, only a courtesy. Ticks every second so a session's Start
+    // button flips enabled the moment its start time genuinely arrives.
+    const trustedNow = useTrustedNow();
     const createSession = useCreateSession(day.id);
     const startSession = useStartSession();
     const endSession = useEndSession();
@@ -440,6 +447,14 @@ export function EventDaySection({
                                 const windowStyle = WINDOW_STYLE[session.windowType] ?? { Icon: Sun, tone: 'neutral' as Tone };
                                 const isOngoing = session.status === SessionStatus.Ongoing;
                                 const isScheduled = session.status === SessionStatus.Scheduled;
+                                // Gated against the server-synced clock, not
+                                // the device's own — see useTrustedNow. This
+                                // is a courtesy that keeps an admin from
+                                // tapping Start early and getting a 409 back;
+                                // StartSession enforces the real rule
+                                // server-side regardless of what this says.
+                                const sessionStartsAt = sessionStartInstant(day.date, session.startTime);
+                                const startNotYetOpen = isScheduled && trustedNow < sessionStartsAt;
 
                                 return (
                                     <div
@@ -463,7 +478,7 @@ export function EventDaySection({
                                                     </Badge>
                                                 </div>
                                                 <Text variant="caption">
-                                                    {session.startTime}–{session.endTime}
+                                                    {formatTimeOfDay(session.startTime)}–{formatTimeOfDay(session.endTime)}
                                                     {session.graceMinutes ? ` · +${session.graceMinutes}m grace` : ''}
                                                 </Text>
                                             </div>
@@ -499,15 +514,22 @@ export function EventDaySection({
                                                     onClick={() => handleStart(session.id)}
                                                     disabled={
                                                         startSession.isPending ||
-                                                        (ongoingSessionId !== null && ongoingSessionId !== session.id)
+                                                        (ongoingSessionId !== null && ongoingSessionId !== session.id) ||
+                                                        startNotYetOpen
                                                     }
                                                     title={
                                                         ongoingSessionId !== null && ongoingSessionId !== session.id
                                                             ? 'Another session in this event is already ongoing. End it first.'
-                                                            : undefined
+                                                            : startNotYetOpen
+                                                              ? `This session opens at ${formatTimeOfDay(session.startTime)}. It can't be started before then.`
+                                                              : undefined
                                                     }
                                                 >
-                                                    {startSession.isPending ? 'Starting…' : 'Start'}
+                                                    {startSession.isPending
+                                                        ? 'Starting…'
+                                                        : startNotYetOpen
+                                                          ? `Opens ${formatTimeOfDay(session.startTime)}`
+                                                          : 'Start'}
                                                 </Button>
                                             )}
 
@@ -650,7 +672,7 @@ export function EventDaySection({
                                 />
                             </div>
                             <div className="space-y-2">
-                                <Label htmlFor={`penaltyAbsent-${day.id}`}>Absent penalty</Label>
+                                <Label htmlFor={`penaltyAbsent-${day.id}`}>Missed penalty</Label>
                                 <Input
                                     id={`penaltyAbsent-${day.id}`}
                                     type="number"
@@ -842,7 +864,7 @@ export function EventDaySection({
                                 />
                             </div>
                             <div className="space-y-2">
-                                <Label htmlFor={`editPenaltyAbsent-${day.id}`}>Absent penalty</Label>
+                                <Label htmlFor={`editPenaltyAbsent-${day.id}`}>Missed penalty</Label>
                                 <Input
                                     id={`editPenaltyAbsent-${day.id}`}
                                     type="number"

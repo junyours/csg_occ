@@ -6,12 +6,15 @@ use App\Application\Actions\Attendance\BuildStreakLeaderboard;
 use App\Application\Actions\Attendance\ComputeAttendanceStreaks;
 use App\Domain\Enums\Role;
 use App\Domain\Enums\SessionStatus;
+use App\Domain\Support\CurrentSemester;
+use App\Domain\Support\SemesterScope;
 use App\Models\AttendancePenalty;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\Department;
 use App\Models\EventModel;
 use App\Models\Exclusion;
+use App\Models\Semester;
 use App\Models\Student;
 use Illuminate\Support\Facades\DB;
 
@@ -38,15 +41,28 @@ final class BuildDashboardSummary
      * because it's explicitly a school-wide ranking, not a
      * departmental one.
      */
-    public function __invoke(Student $user): array
+    /**
+     * Students are always held to the current semester. Admins default to it,
+     * may pass a past `$semesterId`, or `$allSemesters` (then `by_semester`
+     * lists each semester separately — never silently blended).
+     */
+    public function __invoke(Student $user, ?int $semesterId = null, bool $allSemesters = false): array
     {
         $streakLeaderboard = ($this->buildStreakLeaderboard)(5);
 
+        if ($user->role === Role::Student) {
+            $scopeId = CurrentSemester::id();
+        } elseif ($allSemesters) {
+            $scopeId = null;
+        } else {
+            $scopeId = $semesterId ?? CurrentSemester::id();
+        }
+
         return match ($user->role) {
-            Role::SystemAdmin, Role::CsgAdmin => $this->buildAdminSummary($user, departmentId: null, streakLeaderboard: $streakLeaderboard),
-            Role::ScAdmin => $this->buildAdminSummary($user, departmentId: $user->sc_admin_department_id, streakLeaderboard: $streakLeaderboard),
+            Role::SystemAdmin, Role::CsgAdmin => $this->buildAdminSummary($user, departmentId: null, streakLeaderboard: $streakLeaderboard, scopeId: $scopeId, allSemesters: $allSemesters),
+            Role::ScAdmin => $this->buildAdminSummary($user, departmentId: $user->sc_admin_department_id, streakLeaderboard: $streakLeaderboard, scopeId: $scopeId, allSemesters: $allSemesters),
             Role::Officer => $this->buildOfficerSummary($user, $streakLeaderboard),
-            Role::Student => $this->buildStudentSummary($user, $streakLeaderboard),
+            Role::Student => $this->buildStudentSummary($user, $streakLeaderboard, $scopeId),
         };
     }
 
@@ -55,47 +71,88 @@ final class BuildDashboardSummary
      * $departmentId) share the exact same shape — SC Admin is just the
      * same dashboard with every count filtered to one department.
      */
-    private function buildAdminSummary(Student $user, ?int $departmentId, array $streakLeaderboard): array
+    private function buildAdminSummary(Student $user, ?int $departmentId, array $streakLeaderboard, ?int $scopeId, bool $allSemesters): array
     {
-        $studentQuery = Student::where('role', Role::Student)
-            ->when($departmentId, fn ($q) => $q->where('department_id', $departmentId));
-
         $session = $this->findActiveSession();
+        $semester = $scopeId !== null ? Semester::find($scopeId) : null;
 
-        return [
+        $summary = [
             'role' => $user->role->value,
             'scope' => $departmentId ? 'department' : 'global',
             'department' => $departmentId ? Department::find($departmentId, ['id', 'name', 'code']) : null,
-            'total_students' => $studentQuery->count(),
-            'events_count' => EventModel::count(),
+            'semester' => $semester ? [
+                'id' => $semester->id,
+                'name' => $semester->name->value,
+                'is_current' => CurrentSemester::isCurrent($semester->id),
+            ] : null,
+            'all_semesters' => $allSemesters,
+            'total_students' => $this->totalStudents($departmentId, $scopeId),
+            'events_count' => SemesterScope::events(EventModel::query(), $scopeId)->count(),
             'active_session' => $this->describeSession($session),
             'active_session_counts' => $session ? $this->sessionCounts($session, $departmentId) : null,
-            // Present/Late/Absent summed across every event and session
-            // that has ever run — never null, unlike active_session_counts
-            // above. That block is tied to whatever session happens to be
-            // `ongoing` right now, so it goes null the moment nothing is
-            // (between windows, or once CSG has ended the event) — but the
-            // admin still needs to see the attendance picture after an
-            // event ends, not just while it's live.
-            'overall_attendance_counts' => $this->overallAttendanceCounts($departmentId),
-            // Same all-time counts as overall_attendance_counts above,
-            // broken down per department — "which department is actually
-            // showing up" is a different (and just as useful) question
-            // from the single global tracked total.
-            'attendance_by_department' => $this->attendanceByDepartment($departmentId),
-            // Same "never disappears" reasoning as overall_attendance_counts
-            // above — penalties keep mattering after an event ends (that's
-            // the whole point of a penalty ledger), so these aren't tied
-            // to any active session either.
-            'penalty_total' => $this->penaltyTotal($departmentId),
-            'penalty_by_event' => $this->penaltyByEvent($departmentId),
-            // Same "grand total vs. per-slice" shape as attendance_by_department
-            // above, but for penalties instead of attendance — "which
-            // department is actually costing the most" is a different (and
-            // just as useful) question from penalty-by-event.
-            'penalty_by_department' => $this->penaltyByDepartment($departmentId),
+            'overall_attendance_counts' => $this->overallAttendanceCounts($departmentId, $scopeId),
+            'attendance_by_department' => $this->attendanceByDepartment($departmentId, $scopeId),
+            'penalty_total' => $this->penaltyTotal($departmentId, $scopeId),
+            'penalty_by_event' => $this->penaltyByEvent($departmentId, $scopeId),
+            'penalty_by_department' => $this->penaltyByDepartment($departmentId, $scopeId),
             'streak_leaderboard' => $streakLeaderboard,
         ];
+
+        if ($allSemesters) {
+            $summary['by_semester'] = $this->bySemester($departmentId);
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Current term / "All": students who are active or hold a record in scope.
+     * Past semester: record-driven (status has no history).
+     */
+    private function totalStudents(?int $departmentId, ?int $scopeId): int
+    {
+        $live = $scopeId === null || CurrentSemester::isCurrent($scopeId);
+
+        $recordedStudentIds = fn () => SemesterScope::records(
+            AttendanceRecord::query()
+                ->join('students', 'students.id', '=', 'attendance_records.student_id')
+                ->when($departmentId && ! $live, fn ($q) => $q->whereRaw(SemesterScope::RECORD_DEPARTMENT.' = ?', [$departmentId]))
+                ->select('attendance_records.student_id'),
+            $scopeId,
+        );
+
+        // Attendee roles (student + CSG/SC/Officer), never System Admin — same
+        // set the rosters and session counts use, so the numbers can't disagree.
+        $query = Student::attendees();
+
+        if ($live) {
+            $query->when($departmentId, fn ($q) => $q->where('department_id', $departmentId))
+                ->where(fn ($q) => $q->where('status', Student::STATUS_ACTIVE)->orWhereIn('id', $recordedStudentIds()));
+        } else {
+            $query->whereIn('id', $recordedStudentIds());
+        }
+
+        return $query->count();
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function bySemester(?int $departmentId): array
+    {
+        return Semester::with('academicYear')->orderByDesc('id')->get()
+            ->map(function (Semester $semester) use ($departmentId) {
+                $counts = $this->overallAttendanceCounts($departmentId, $semester->id);
+
+                return [
+                    'semester_id' => $semester->id,
+                    'semester_name' => $semester->name->value,
+                    'academic_year_name' => $semester->academicYear?->name,
+                    'is_current' => CurrentSemester::isCurrent($semester->id),
+                    'present' => $counts['present'],
+                    'late' => $counts['late'],
+                    'missed' => $counts['missed'],
+                    'penalty_total' => $this->penaltyTotal($departmentId, $semester->id),
+                ];
+            })->values()->all();
     }
 
     /**
@@ -122,9 +179,10 @@ final class BuildDashboardSummary
         ];
     }
 
-    private function buildStudentSummary(Student $user, array $streakLeaderboard): array
+    private function buildStudentSummary(Student $user, array $streakLeaderboard, ?int $scopeId): array
     {
-        $statusCounts = AttendanceRecord::where('student_id', $user->id)
+        // Counts: current semester only. Penalties (below) stay across all semesters.
+        $statusCounts = SemesterScope::records(AttendanceRecord::where('student_id', $user->id), $scopeId)
             ->select('status', DB::raw('count(*) as cnt'))
             ->groupBy('status')
             ->pluck('cnt', 'status');
@@ -149,7 +207,7 @@ final class BuildDashboardSummary
             'totals' => [
                 'present' => (int) ($statusCounts['present'] ?? 0),
                 'late' => (int) ($statusCounts['late'] ?? 0),
-                'absent' => (int) ($statusCounts['absent'] ?? 0),
+                'missed' => (int) ($statusCounts['missed'] ?? 0),
                 'excluded' => (int) ($statusCounts['excluded'] ?? 0),
             ],
             'penalty_total' => $penaltyTotal,
@@ -200,10 +258,10 @@ final class BuildDashboardSummary
     }
 
     /**
-     * Present/Late come straight from recorded attendance_records; Absent
+     * Present/Late come straight from recorded attendance_records; Missed
      * only ever appears here as non-zero once EndSession has actually run
      * (it's the only thing allowed to assign it) — same "never guess
-     * Absent" rule as BuildSessionReport.
+     * Missed" rule as BuildSessionReport.
      */
     private function sessionCounts(AttendanceSession $session, ?int $departmentId): array
     {
@@ -212,9 +270,12 @@ final class BuildDashboardSummary
         // never included shouldn't inflate the "pending" count here.
         $includedDepartmentIds = $session->eventDay->event->includedDepartmentIds();
 
-        $rosterIds = Student::where('role', Role::Student)
+        // Attendees (same people the session report lists); active or holding a record.
+        $rosterIds = Student::attendees()
             ->whereIn('department_id', $includedDepartmentIds)
             ->when($departmentId, fn ($q) => $q->where('department_id', $departmentId))
+            ->where(fn ($q) => $q->where('status', Student::STATUS_ACTIVE)
+                ->orWhereIn('id', AttendanceRecord::query()->select('student_id')->where('session_id', $session->id)))
             ->pluck('id');
 
         $recordCounts = AttendanceRecord::where('session_id', $session->id)
@@ -229,13 +290,13 @@ final class BuildDashboardSummary
 
         $present = (int) ($recordCounts['present'] ?? 0);
         $late = (int) ($recordCounts['late'] ?? 0);
-        $absent = (int) ($recordCounts['absent'] ?? 0);
-        $pending = $rosterIds->count() - $present - $late - $absent - $excludedCount;
+        $missed = (int) ($recordCounts['missed'] ?? 0);
+        $pending = $rosterIds->count() - $present - $late - $missed - $excludedCount;
 
         return [
             'present' => $present,
             'late' => $late,
-            'absent' => $absent,
+            'missed' => $missed,
             'excluded' => $excludedCount,
             'pending' => max($pending, 0),
             'total_students' => $rosterIds->count(),
@@ -243,7 +304,7 @@ final class BuildDashboardSummary
     }
 
     /**
-     * Present/Late/Absent totals across every AttendanceRecord ever
+     * Present/Late/Missed totals across every AttendanceRecord ever
      * written, department-scoped the same way as everything else in this
      * summary — this is the all-time counterpart to sessionCounts(),
      * which only ever looks at one (currently ongoing) session. Unlike
@@ -257,59 +318,59 @@ final class BuildDashboardSummary
      * that would mean re-deriving exclusion scope for every session ever
      * run, which isn't worth it for a dashboard tile.
      */
-    private function overallAttendanceCounts(?int $departmentId): array
+    private function overallAttendanceCounts(?int $departmentId, ?int $scopeId): array
     {
-        $rosterIds = Student::where('role', Role::Student)
-            ->when($departmentId, fn ($q) => $q->where('department_id', $departmentId))
-            ->pluck('id');
-
-        $recordCounts = AttendanceRecord::whereIn('student_id', $rosterIds)
-            ->select('status', DB::raw('count(*) as cnt'))
-            ->groupBy('status')
-            ->pluck('cnt', 'status');
+        // Record-driven; department read from each record's snapshot.
+        $recordCounts = SemesterScope::records(
+            DB::table('attendance_records')
+                ->join('students', 'students.id', '=', 'attendance_records.student_id')
+                ->when($departmentId, fn ($q) => $q->whereRaw(SemesterScope::RECORD_DEPARTMENT.' = ?', [$departmentId]))
+                ->select('attendance_records.status', DB::raw('count(*) as cnt'))
+                ->groupBy('attendance_records.status'),
+            $scopeId,
+        )->pluck('cnt', 'status');
 
         return [
             'present' => (int) ($recordCounts['present'] ?? 0),
             'late' => (int) ($recordCounts['late'] ?? 0),
-            'absent' => (int) ($recordCounts['absent'] ?? 0),
+            'missed' => (int) ($recordCounts['missed'] ?? 0),
         ];
     }
 
     /**
-     * The same all-time Present/Late/Absent counts as
+     * The same all-time Present/Late/Missed counts as
      * overallAttendanceCounts(), broken down per department, each row
      * carrying its share of the overall tracked total (present + late +
-     * absent, summed across every department returned here) — the
+     * missed, summed across every department returned here) — the
      * attendance counterpart to penaltyByEvent() below, same "grand
      * total vs. per-slice" reasoning. For an SC Admin ($departmentId
      * set) this naturally collapses to their one department at 100%,
      * same as every other scoped total in this class.
      *
-     * @return array<int, array{department_id: int, department_name: string, department_code: string, present: int, late: int, absent: int, tracked: int, percentage_of_overall: float}>
+     * @return array<int, array{department_id: int, department_name: string, department_code: string, present: int, late: int, missed: int, tracked: int, percentage_of_overall: float}>
      */
-    private function attendanceByDepartment(?int $departmentId): array
+    private function attendanceByDepartment(?int $departmentId, ?int $scopeId): array
     {
-        $rows = AttendanceRecord::query()
+        $rows = SemesterScope::records(AttendanceRecord::query(), $scopeId)
             ->join('students', 'students.id', '=', 'attendance_records.student_id')
-            ->join('departments', 'departments.id', '=', 'students.department_id')
-            ->where('students.role', Role::Student->value)
-            ->when($departmentId, fn ($q) => $q->where('students.department_id', $departmentId))
+            ->join('departments', 'departments.id', '=', DB::raw(SemesterScope::RECORD_DEPARTMENT))
+            ->when($departmentId, fn ($q) => $q->whereRaw(SemesterScope::RECORD_DEPARTMENT.' = ?', [$departmentId]))
             ->select(
                 'departments.id as department_id',
                 'departments.name as department_name',
                 'departments.code as department_code',
                 DB::raw("sum(case when attendance_records.status = 'present' then 1 else 0 end) as present"),
                 DB::raw("sum(case when attendance_records.status = 'late' then 1 else 0 end) as late"),
-                DB::raw("sum(case when attendance_records.status = 'absent' then 1 else 0 end) as absent"),
+                DB::raw("sum(case when attendance_records.status = 'missed' then 1 else 0 end) as missed"),
             )
             ->groupBy('departments.id', 'departments.name', 'departments.code')
             ->get();
 
-        $overallTracked = $rows->sum(fn ($row) => (int) $row->present + (int) $row->late + (int) $row->absent);
+        $overallTracked = $rows->sum(fn ($row) => (int) $row->present + (int) $row->late + (int) $row->missed);
 
         return $rows
             ->map(function ($row) use ($overallTracked) {
-                $tracked = (int) $row->present + (int) $row->late + (int) $row->absent;
+                $tracked = (int) $row->present + (int) $row->late + (int) $row->missed;
 
                 return [
                     'department_id' => (int) $row->department_id,
@@ -317,7 +378,7 @@ final class BuildDashboardSummary
                     'department_code' => $row->department_code,
                     'present' => (int) $row->present,
                     'late' => (int) $row->late,
-                    'absent' => (int) $row->absent,
+                    'missed' => (int) $row->missed,
                     'tracked' => $tracked,
                     'percentage_of_overall' => $overallTracked > 0 ? round($tracked / $overallTracked * 100, 2) : 0.0,
                 ];
@@ -334,13 +395,10 @@ final class BuildDashboardSummary
      * (spec §7.3: the ledger is "auditable and reversible", a reversed
      * entry shouldn't still count against anyone's balance).
      */
-    private function penaltyTotal(?int $departmentId): float
+    private function penaltyTotal(?int $departmentId, ?int $scopeId): float
     {
-        $rosterIds = Student::where('role', Role::Student)
-            ->when($departmentId, fn ($q) => $q->where('department_id', $departmentId))
-            ->pluck('id');
-
-        return (float) AttendancePenalty::whereIn('student_id', $rosterIds)
+        return (float) SemesterScope::penalties(AttendancePenalty::query(), $scopeId)
+            ->when($departmentId, fn ($q) => SemesterScope::penaltyDepartment($q, $departmentId))
             ->where('is_reversed', false)
             ->sum('amount');
     }
@@ -355,17 +413,13 @@ final class BuildDashboardSummary
      *
      * @return array<int, array{event_id: int, event_name: string, penalty_total: float, percentage_of_overall: float}>
      */
-    private function penaltyByEvent(?int $departmentId): array
+    private function penaltyByEvent(?int $departmentId, ?int $scopeId): array
     {
-        $rosterIds = Student::where('role', Role::Student)
-            ->when($departmentId, fn ($q) => $q->where('department_id', $departmentId))
-            ->pluck('id');
-
-        $rows = AttendancePenalty::query()
+        $rows = SemesterScope::penalties(AttendancePenalty::query(), $scopeId)
             ->join('attendance_sessions', 'attendance_sessions.id', '=', 'attendance_penalties.session_id')
             ->join('event_days', 'event_days.id', '=', 'attendance_sessions.event_day_id')
             ->join('events', 'events.id', '=', 'event_days.event_id')
-            ->whereIn('attendance_penalties.student_id', $rosterIds)
+            ->when($departmentId, fn ($q) => SemesterScope::penaltyDepartment($q, $departmentId))
             ->where('attendance_penalties.is_reversed', false)
             ->select(
                 'events.id as event_id',
@@ -404,14 +458,18 @@ final class BuildDashboardSummary
      *
      * @return array<int, array{department_id: int, department_name: string, department_code: string, penalty_total: float, percentage_of_overall: float}>
      */
-    private function penaltyByDepartment(?int $departmentId): array
+    private function penaltyByDepartment(?int $departmentId, ?int $scopeId): array
     {
-        $rows = AttendancePenalty::query()
+        // Department from the snapshot on the record the penalty came from.
+        $rows = SemesterScope::penalties(AttendancePenalty::query(), $scopeId)
             ->join('students', 'students.id', '=', 'attendance_penalties.student_id')
-            ->join('departments', 'departments.id', '=', 'students.department_id')
-            ->where('students.role', Role::Student->value)
+            ->leftJoin('attendance_records', function ($join) {
+                $join->on('attendance_records.session_id', '=', 'attendance_penalties.session_id')
+                    ->on('attendance_records.student_id', '=', 'attendance_penalties.student_id');
+            })
+            ->join('departments', 'departments.id', '=', DB::raw(SemesterScope::RECORD_DEPARTMENT))
             ->where('attendance_penalties.is_reversed', false)
-            ->when($departmentId, fn ($q) => $q->where('students.department_id', $departmentId))
+            ->when($departmentId, fn ($q) => $q->whereRaw(SemesterScope::RECORD_DEPARTMENT.' = ?', [$departmentId]))
             ->select(
                 'departments.id as department_id',
                 'departments.name as department_name',

@@ -6,6 +6,6 @@ enum AttendanceStatus: string
 {
     case Present = 'present';
     case Late = 'late';
-    case Absent = 'absent';
+    case Missed = 'missed';
     case Excluded = 'excluded';
 }

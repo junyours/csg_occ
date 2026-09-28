@@ -36,7 +36,7 @@ function dashboardAdmin(): Student
             'last_name' => 'Admin', 'first_name' => 'CSG',
             'department_id' => dashboardDept('CCS')->id,
             'username' => 'csgadmin', 'password' => 'password',
-            'role' => Role::CsgAdmin,
+            'role' => Role::SystemAdmin,
         ],
     );
 }
@@ -76,7 +76,7 @@ it('keeps overall attendance counts and penalty totals after the session and eve
     ]);
 
     $present = dashboardStudent('2023000001');
-    dashboardStudent('2023000002'); // will end up Absent, charged the 25 penalty
+    dashboardStudent('2023000002'); // will end up Missed, charged the 25 penalty
 
     // StartSession fetches and updates its own locked copy of the row
     // rather than mutating the $session instance passed in, so the
@@ -101,7 +101,7 @@ it('keeps overall attendance counts and penalty totals after the session and eve
         ->and($summary['overall_attendance_counts'])->toBe([
             'present' => 1,
             'late' => 0,
-            'absent' => 1,
+            'missed' => 1,
         ])
         ->and($summary['penalty_total'])->toBe(25.0)
         ->and($summary['penalty_by_event'])->toBe([
@@ -114,7 +114,7 @@ it('keeps overall attendance counts and penalty totals after the session and eve
                 'department_code' => 'CCS',
                 'present' => 1,
                 'late' => 0,
-                'absent' => 1,
+                'missed' => 1,
                 'tracked' => 2,
                 'percentage_of_overall' => 100.0,
             ],
@@ -144,7 +144,7 @@ it('splits penalty totals across departments', function () {
         'status' => SessionStatus::Scheduled,
     ]);
 
-    // Both students never scan, so both are charged the absent penalty —
+    // Both students never scan, so both are charged the missed penalty —
     // one per department, so the split should be an even 50/50.
     dashboardStudent('2023000001'); // CCS
     $otherDept = Department::firstOrCreate(['code' => 'BSIT'], ['name' => 'BSIT']);
@@ -206,11 +206,11 @@ it('scopes overall attendance counts to the sc admin\'s own department', functio
 
     $summary = (new BuildDashboardSummary)($scAdmin);
 
-    // Only the CCS student's outcome counts — the BSIT student (absent,
+    // Only the CCS student's outcome counts — the BSIT student (missed,
     // since they never scanned) is out of scope for this SC Admin.
     expect($summary['overall_attendance_counts'])->toBe([
         'present' => 1,
         'late' => 0,
-        'absent' => 0,
+        'missed' => 0,
     ]);
 });

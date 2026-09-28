@@ -19,11 +19,11 @@ class StudentSeeder extends Seeder
 
         $this->makeStudent([
             'student_number' => '9090-9-90909',
-            'last_name' => 'Reyes',
-            'first_name' => 'Sofia',
+            'last_name' => 'XCode',
+            'first_name' => 'SysAdmin',
             'department_id' => $bsit->id,
             'year_level' => '4',
-            'section' => '4A',
+            'section' => '4C',
             'role' => Role::SystemAdmin,
         ]);
     }
