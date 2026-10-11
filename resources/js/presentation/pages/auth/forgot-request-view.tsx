@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Text } from '@/presentation/components/typography';
-import { formatStudentNumber } from '@/lib/utils';
+import { formatStudentNumber, LOGIN_STUDENT_NUMBER_MAX_DIGITS } from '@/lib/utils';
 
 interface ForgotRequestViewProps {
     studentNumber: string;
@@ -37,7 +37,7 @@ export function ForgotRequestView({
                     autoFocus
                     placeholder="e.g. 2023-1-05413"
                     value={studentNumber}
-                    onChange={(event) => onStudentNumberChange(formatStudentNumber(event.target.value))}
+                    onChange={(event) => onStudentNumberChange(formatStudentNumber(event.target.value, LOGIN_STUDENT_NUMBER_MAX_DIGITS))}
                     required
                 />
             </div>

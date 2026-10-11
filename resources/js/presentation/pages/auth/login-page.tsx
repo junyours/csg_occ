@@ -21,7 +21,7 @@ import { useAcceptTerms } from '@/application/auth/use-accept-terms';
 import { useLogin } from '@/application/auth/use-login';
 import { Tile } from '@/presentation/components/tile';
 import { TONE } from '@/presentation/components/tone';
-import { cn, formatStudentNumber } from '@/lib/utils';
+import { cn, formatStudentNumber, LOGIN_STUDENT_NUMBER_MAX_DIGITS } from '@/lib/utils';
 import { httpAuthRepository } from '@/infrastructure/auth/auth.repository.http';
 
 // Three things the login screen can show. "picker" is the default whenever
@@ -238,7 +238,7 @@ export function LoginPage() {
                         inputMode="numeric"
                         placeholder="e.g. 2023-1-05413"
                         value={studentNumber}
-                        onChange={(event) => setStudentNumber(formatStudentNumber(event.target.value))}
+                        onChange={(event) => setStudentNumber(formatStudentNumber(event.target.value, LOGIN_STUDENT_NUMBER_MAX_DIGITS))}
                         onKeyDown={(event) => {
                             // Allow navigation/editing keys and any
                             // Ctrl/Cmd shortcut (e.g. Ctrl+A) through

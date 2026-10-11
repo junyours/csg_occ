@@ -123,6 +123,12 @@ export function diffDateOnlyDays(a: string, b: string): number {
 }
 
 /**
+ * Max digits for the sign-in flow (login + forgot password). Most IDs are
+ * 10 digits (2023-1-05413) but some have a 6-digit tail (2023-1-054133).
+ */
+export const LOGIN_STUDENT_NUMBER_MAX_DIGITS = 11;
+
+/**
  * Student IDs are stored (and matched on) in dashed form —
  * "2023-1-05413" — but typing dashes is annoying, so this reformats
  * whatever's typed/pasted into that shape as the person goes. It works
@@ -133,9 +139,13 @@ export function diffDateOnlyDays(a: string, b: string): number {
  * Shared by every field that captures a student number (login, Add
  * student, Add exclusion, ...) so the mask behaves identically and
  * can't drift between them.
+ *
+ * `maxDigits` defaults to 10 (the standard 2023-1-05413 shape). The sign-in flow
+ * passes 11 so students whose ID has a 6-digit tail (2023-1-054133)
+ * can still type their full number.
  */
-export function formatStudentNumber(raw: string): string {
-    const digits = raw.replace(/\D/g, '').slice(0, 10);
+export function formatStudentNumber(raw: string, maxDigits = 10): string {
+    const digits = raw.replace(/\D/g, '').slice(0, maxDigits);
     if (digits.length <= 4) return digits;
     if (digits.length <= 5) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
     return `${digits.slice(0, 4)}-${digits.slice(4, 5)}-${digits.slice(5)}`;
