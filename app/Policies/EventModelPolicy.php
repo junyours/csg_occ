@@ -74,6 +74,16 @@ class EventModelPolicy
     }
 
     /**
+     * System Admin-only override to delete an ENDED event together with
+     * all of its attendance data (ForceDeleteEvent). Deliberately narrower
+     * than delete(): CSG Admin cannot do this.
+     */
+    public function forceDelete(Student $user): bool
+    {
+        return $user->role === Role::SystemAdmin;
+    }
+
+    /**
      * Editing a Day's date — same two-role gate as update()/create().
      * The "is this day's own state eligible" business rule
      * (hasAnyStartedOrEndedSession, event-ended, date uniqueness) is

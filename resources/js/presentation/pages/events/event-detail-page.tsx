@@ -25,6 +25,7 @@ import { useEvents } from '@/application/events/use-events';
 import { useCreateEventDay } from '@/application/events/use-create-event-day';
 import { useDeleteEvent } from '@/application/events/use-delete-event';
 import { useEndEvent } from '@/application/events/use-end-event';
+import { useForceDeleteEvent } from '@/application/events/use-force-delete-event';
 import { useMyEventAttendance } from '@/application/events/use-my-event-attendance';
 import { useUpdateEvent } from '@/application/events/use-update-event';
 import { EVENT_STATUS_BADGE_CLASS, EVENT_STATUS_LABEL, EventStatus, Role, SessionStatus } from '@/domain/enums';
@@ -74,12 +75,15 @@ export function EventDetailPage() {
     const [eventForm, setEventForm] = useState<EventFormValues>({ name: '', description: '' });
     const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
     const [isDeletingEvent, setIsDeletingEvent] = useState(false);
+    const [isForceDeleting, setIsForceDeleting] = useState(false);
+    const [forceDeleteName, setForceDeleteName] = useState('');
 
     const event = events?.find((candidate) => candidate.id === Number(eventId));
     const createEventDay = useCreateEventDay(Number(eventId));
     const endEvent = useEndEvent();
     const updateEvent = useUpdateEvent();
     const deleteEvent = useDeleteEvent();
+    const forceDeleteEvent = useForceDeleteEvent();
     // Only rendered for non-managers (see canManage below), but the hook
     // itself has to run unconditionally either way — React's rules of
     // hooks don't allow it behind the early `if (!student)` return.
@@ -118,6 +122,22 @@ export function EventDetailPage() {
             },
             onError: () => toast.error('Could not end event.'),
         });
+    }
+
+    function confirmForceDelete() {
+        if (!event) return;
+
+        forceDeleteEvent.mutate(
+            { eventId: event.id, confirmName: forceDeleteName },
+            {
+                onSuccess: () => {
+                    toast.success('Event and all its attendance data were deleted.');
+                    setIsForceDeleting(false);
+                    navigate('/events');
+                },
+                onError: (error) => toast.error(extractErrorMessage(error, 'Could not delete this event.')),
+            },
+        );
     }
 
     function confirmDeleteEvent() {
@@ -270,6 +290,22 @@ export function EventDetailPage() {
                                     className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
                                     onClick={() => setIsDeletingEvent(true)}
                                     aria-label="Delete event"
+                                >
+                                    <Trash2 className="size-3.5" />
+                                </Button>
+                            )}
+                            {/* System Admin only, ended events only — the
+                                override DeleteEvent deliberately doesn't offer. */}
+                            {student.role === Role.SystemAdmin && isEventEnded && (
+                                <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
+                                    onClick={() => {
+                                        setForceDeleteName('');
+                                        setIsForceDeleting(true);
+                                    }}
+                                    aria-label="Delete ended event and all its data"
                                 >
                                     <Trash2 className="size-3.5" />
                                 </Button>
@@ -497,6 +533,41 @@ export function EventDetailPage() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            <Dialog open={isForceDeleting} onOpenChange={setIsForceDeleting}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Delete ended event and all its data?</DialogTitle>
+                    </DialogHeader>
+                    <Text variant="small">
+                        This permanently deletes {event?.name} and every day, session, attendance record (present, late, missed, excluded),
+                        penalty, exclusion and generated report that belongs to it. Students and other events are not affected, and dashboard
+                        and penalty totals will drop accordingly. This can't be undone.
+                    </Text>
+                    <div className="space-y-2">
+                        <Label htmlFor="force-delete-name">Type the event name to confirm</Label>
+                        <Input
+                            id="force-delete-name"
+                            value={forceDeleteName}
+                            onChange={(e) => setForceDeleteName(e.target.value)}
+                            placeholder={event?.name}
+                            autoComplete="off"
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsForceDeleting(false)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            onClick={confirmForceDelete}
+                            disabled={forceDeleteEvent.isPending || forceDeleteName.trim() !== event?.name}
+                        >
+                            {forceDeleteEvent.isPending ? 'Deleting…' : 'Delete everything'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <AlertDialog open={isDeletingEvent} onOpenChange={setIsDeletingEvent}>
                 <AlertDialogContent>

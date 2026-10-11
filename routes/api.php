@@ -10,6 +10,7 @@ use App\Http\Controllers\Departments\DepartmentController;
 use App\Http\Controllers\Departments\DepartmentLogoController;
 use App\Http\Controllers\Events\EndEventController;
 use App\Http\Controllers\Events\EventController;
+use App\Http\Controllers\Events\EventForceDeleteController;
 use App\Http\Controllers\Events\EventDayController;
 use App\Http\Controllers\Events\EventMyAttendanceController;
 use App\Http\Controllers\Events\EventRosterReportController;
@@ -213,6 +214,10 @@ Route::middleware(['auth:sanctum', 'account.active', 'throttle:api'])->group(fun
             // started or ended, or if any exclusion/report record already
             // references it — see DeleteEvent.
             Route::delete('/events/{event}', [EventController::class, 'destroy']);
+
+            // System Admin override: delete an ENDED event and all its
+            // attendance data (type-the-name confirmation) — see ForceDeleteEvent.
+            Route::post('/events/{event}/force-delete', [EventForceDeleteController::class, 'store']);
 
             Route::post('/events/{event}/days', [EventDayController::class, 'store']);
 

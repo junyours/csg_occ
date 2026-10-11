@@ -377,6 +377,13 @@ export const httpEventsRepository = {
         await httpClient.delete(`/events/${eventId}`);
     },
 
+    // System Admin only: deletes an ENDED event and all of its attendance
+    // data (records, penalties, exclusions, reports). The server requires
+    // the event's exact name as confirmation.
+    async forceDelete(eventId: number, confirmName: string): Promise<void> {
+        await httpClient.post(`/events/${eventId}/force-delete`, { confirm_name: confirmName });
+    },
+
     // §4.2/§4.4: refused with 409 if any session under the day has
     // started or ended, or the parent event has already ended. On
     // success, cascades Day/Window-scope exclusion soft-removal — see
