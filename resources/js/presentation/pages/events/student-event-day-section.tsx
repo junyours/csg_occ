@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { CalendarDays, Moon, QrCode, Sun, Sunrise, type LucideIcon } from 'lucide-react';
+import { QrCode, Sun } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,30 +10,23 @@ import {
     CHECK_TYPE_LABEL,
     SessionStatus,
     WINDOW_TYPE_LABEL,
-    WindowType,
 } from '@/domain/enums';
 import { cn, formatDate, formatScannedAt, formatTimeOfDay } from '@/lib/utils';
 import { Text } from '@/presentation/components/typography';
 import { Tile } from '@/presentation/components/tile';
 import { TONE, type Tone } from '@/presentation/components/tone';
-
-const WINDOW_STYLE: Record<string, { Icon: LucideIcon; tone: Tone }> = {
-    [WindowType.Morning]: { Icon: Sunrise, tone: 'amber' },
-    [WindowType.Afternoon]: { Icon: Sun, tone: 'orange' },
-    [WindowType.Evening]: { Icon: Moon, tone: 'violet' },
-};
+import { WINDOW_STYLE } from '@/presentation/components/window-style';
 
 export function StudentEventDaySection({ day }: { day: MyAttendanceDay }) {
     return (
-        <div className="space-y-4 rounded-3xl border border-border bg-card p-4">
-            <div className="flex items-center gap-2">
-                <Tile tone="sky" size="sm" variant="soft" Icon={CalendarDays} />
-                <div className="min-w-0">
-                    <Text variant="small" className="font-medium text-foreground">
-                        Day {day.dayNumber}
-                    </Text>
-                    <Text variant="caption">{formatDate(day.date)}</Text>
-                </div>
+        <div className="space-y-4">
+            <div className="min-w-0">
+                <Text variant="small" className="font-semibold text-foreground">
+                    {formatDate(day.date)}
+                </Text>
+                <Text variant="caption">
+                    Day {day.dayNumber} · {day.sessions.length} {day.sessions.length === 1 ? 'session' : 'sessions'}
+                </Text>
             </div>
 
             {day.sessions.length === 0 && (
@@ -51,11 +44,16 @@ export function StudentEventDaySection({ day }: { day: MyAttendanceDay }) {
                     return (
                         <div
                             key={session.id}
-                            className={cn('space-y-2 rounded-2xl border border-border p-4', needsScan && TONE.violet.wash)}
+                            className={cn('space-y-2 rounded-lg border border-border p-4', needsScan && TONE.violet.wash)}
                         >
                             <div className="flex items-start justify-between gap-4">
                                 <div className="flex min-w-0 items-center gap-4">
-                                    <Tile tone={windowStyle.tone} variant={isOngoing ? 'solid' : 'soft'} Icon={windowStyle.Icon} />
+                                    <Tile
+                                        tone={windowStyle.tone}
+                                        variant={isOngoing ? 'solid' : 'soft'}
+                                        Icon={windowStyle.Icon}
+                                        className={isOngoing ? '[&>svg]:animate-pulse' : undefined}
+                                    />
                                     <div className="min-w-0">
                                         <Text variant="small" className="font-medium text-foreground">
                                             {WINDOW_TYPE_LABEL[session.windowType]} · {CHECK_TYPE_LABEL[session.checkType]}
@@ -90,7 +88,7 @@ export function StudentEventDaySection({ day }: { day: MyAttendanceDay }) {
                               quiet outline off to the side.
                             */}
                             {needsScan && (
-                                <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-2">
+                                <div className="flex items-center justify-between gap-4 rounded-md bg-card p-2">
                                     <Text variant="caption" className="min-w-0">
                                         Open now — show your QR to the attendance committee.
                                     </Text>

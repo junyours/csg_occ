@@ -1,10 +1,11 @@
 import { useQueries } from '@tanstack/react-query';
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useAuthStore } from '@/application/auth/auth.store';
 import { useAcademicYears } from '@/application/academic-years/use-academic-years';
 import { semestersQueryKey } from '@/application/semesters/use-semesters';
 import { httpSemestersRepository } from '@/infrastructure/semesters/semesters.repository.http';
-import { SEMESTER_LABEL, type Semester as SemesterTerm } from '@/domain/enums';
+import { Role, SEMESTER_LABEL, type Semester as SemesterTerm } from '@/domain/enums';
 
 /** `'current'` = the active semester (server default), a number = that semester, `'all'` = every semester. */
 export type SemesterSelection = 'current' | 'all' | number;
@@ -22,6 +23,10 @@ interface SemesterPickerProps {
  * semester of every academic year, newest year first.
  */
 export function SemesterPicker({ value, onChange, allowAll = false, className }: SemesterPickerProps) {
+    // Only the System Admin may browse other semesters. Everyone else stays on
+    // the current one (the server default), so the control isn't rendered at
+    // all. Hooks below still run unconditionally; the early return comes last.
+    const role = useAuthStore((state) => state.student?.role);
     const { data: academicYears } = useAcademicYears();
 
     const results = useQueries({
@@ -37,6 +42,8 @@ export function SemesterPicker({ value, onChange, allowAll = false, className }:
             label: `${year.name} — ${SEMESTER_LABEL[semester.name as SemesterTerm] ?? semester.name}${semester.isActive ? ' (current)' : ''}`,
         })),
     );
+
+    if (role !== Role.SystemAdmin) return null;
 
     return (
         <Select

@@ -27,6 +27,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Heading, Text } from '@/presentation/components/typography';
 import { EmptyState, ListSkeleton } from '@/presentation/components/empty-state';
+import { LiveTag } from '@/presentation/components/live-tag';
 import { Tile } from '@/presentation/components/tile';
 import { TONE } from '@/presentation/components/tone';
 import { CHIP } from '@/presentation/components/spacing';
@@ -194,8 +195,7 @@ export function EventsPage() {
                             key={event.id}
                             to={`/events/${event.id}`}
                             className={cn(
-                                'flex items-center gap-4 rounded-2xl border bg-card p-4 transition-all hover:shadow-md active:scale-[0.995]',
-                                isOngoing && TONE.emerald.wash,
+                                'flex items-center gap-4 rounded-[10px] border bg-card p-4 transition-all hover:border-foreground/20 hover:shadow-sm active:scale-[0.995]',
                             )}
                         >
                             {/* Lit only while the event is running. A list of
@@ -206,14 +206,19 @@ export function EventsPage() {
                                 size="lg"
                                 variant={isOngoing ? 'solid' : 'soft'}
                                 Icon={isOngoing ? Radio : CalendarDays}
+                                className={isOngoing ? '[&>svg]:animate-pulse' : undefined}
                             />
 
-                            <div className="min-w-0 flex-1 space-y-2">
+                            <div className="min-w-0 flex-1 space-y-1">
                                 <div className="flex flex-wrap items-center gap-2">
                                     <Text className="truncate font-medium">{event.name}</Text>
-                                    <Badge variant="secondary" className={EVENT_STATUS_BADGE_CLASS[event.status]}>
-                                        {EVENT_STATUS_LABEL[event.status]}
-                                    </Badge>
+                                    {isOngoing ? (
+                                        <LiveTag />
+                                    ) : (
+                                        <Badge variant="secondary" className={cn('rounded-sm', EVENT_STATUS_BADGE_CLASS[event.status])}>
+                                            {EVENT_STATUS_LABEL[event.status]}
+                                        </Badge>
+                                    )}
                                 </div>
 
                                 <Text variant="caption" className="truncate">

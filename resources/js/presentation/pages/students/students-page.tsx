@@ -3,7 +3,6 @@ import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -21,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { useAuthStore } from '@/application/auth/auth.store';
 import { useDepartments } from '@/application/departments/use-departments';
+import { useDebouncedValue } from '@/application/shared/use-debounced-value';
 import { useStudents } from '@/application/students/use-students';
 import { useCreateStudent } from '@/application/students/use-create-student';
 import { useUpdateStudent, useUpdateStudentStatus } from '@/application/students/use-update-student';
@@ -36,8 +36,9 @@ import { Role, ROLE_LABEL, type StudentStatus } from '@/domain/enums';
 import { canResetStudentPassword } from '@/domain/student-access';
 import { apiErrorMessage, cn, formatStudentNumber } from '@/lib/utils';
 import { Heading, Text } from '@/presentation/components/typography';
+import { AvatarLightbox } from '@/presentation/components/avatar-lightbox';
 import { UserAvatar } from '@/presentation/components/user-avatar';
-import { TONE, type Tone } from '@/presentation/components/tone';
+import { departmentTone, TONE, type Tone } from '@/presentation/components/tone';
 
 // Same tinted-squircle language as the dashboard: a role gets one
 // consistent hue everywhere it shows up (row avatar, "change role" chip),
@@ -99,14 +100,21 @@ export function StudentsPage() {
     const isScAdmin = student?.role === Role.ScAdmin;
     const canFilterDepartment = student?.role === Role.SystemAdmin || student?.role === Role.CsgAdmin;
 
+    // The inputs stay bound to the live text so typing feels instant, but the
+    // query only sees the value once typing has paused (350ms) — otherwise
+    // every keystroke is its own API request.
+    const debouncedSearch = useDebouncedValue(search);
+    const debouncedYearLevel = useDebouncedValue(yearLevelFilter);
+    const debouncedSection = useDebouncedValue(sectionFilter);
+
     const { data: rosterPage, isLoading } = useStudents({
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         departmentId:
             canFilterDepartment && departmentFilter !== 'all' ? Number(departmentFilter) : undefined,
         role: roleFilter !== 'all' ? (roleFilter as Role) : undefined,
         status: statusFilter !== 'all' ? (statusFilter as StudentStatus) : undefined,
-        yearLevel: yearLevelFilter || undefined,
-        section: sectionFilter || undefined,
+        yearLevel: debouncedYearLevel || undefined,
+        section: debouncedSection || undefined,
         page,
         perPage: PER_PAGE,
     });
@@ -149,6 +157,7 @@ export function StudentsPage() {
     const assignableRoles = ASSIGNABLE_ROLES[student.role] ?? [];
     const canAssignRoles = assignableRoles.length > 0;
     const departmentName = (id: number) => departments?.find((d) => d.id === id)?.code ?? '—';
+    const deptToneFor = (id: number): Tone => departmentTone(departments?.find((d) => d.id === id)?.code, id);
 
     function handleResetPasswordConfirmed(event: MouseEvent) {
         // Keep the dialog open until the request finishes, so a failure
@@ -786,10 +795,12 @@ export function StudentsPage() {
                 {isLoading && <Text variant="small">Loading…</Text>}
                 {!isLoading && rosterPage?.data.length === 0 && <Text variant="small">No students match these filters.</Text>}
 
-                {rosterPage?.data.map((row) => (
-                    <Card key={row.id}>
+                {rosterPage && rosterPage.data.length > 0 && (
+                <div className="space-y-3">
+                {rosterPage.data.map((row) => (
+                    <div key={row.id} className="overflow-hidden rounded-[10px] border bg-card p-4 transition-colors hover:bg-muted/30 sm:px-6">
                         {editingRoleId === row.id ? (
-                            <CardContent>
+                            <div>
                                 <form onSubmit={(e) => handleRoleSubmit(e, row)} className="space-y-4">
                                     <div className="flex flex-wrap items-center gap-2">
                                         <Text variant="small" className="font-medium">
@@ -873,55 +884,67 @@ export function StudentsPage() {
                                         </Button>
                                     </div>
                                 </form>
-                            </CardContent>
+                            </div>
                         ) : (
-                            <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                                <div className="flex min-w-0 items-center gap-4">
-                                    {/* The student's own photo. UserAvatar falls back to the
-                                        same initials this used to draw, tinted with the role
-                                        hue so a roster with no photos on file still reads
-                                        exactly as it did before. */}
-                                    <UserAvatar
-                                        student={row}
-                                        size="lg"
-                                        fallbackClassName={cn('text-xs font-bold', TONE[ROLE_TONE[row.role]].soft)}
-                                    />
-                                    <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-                                            <Text className="truncate font-medium">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                                <div className="flex min-w-0 items-center gap-3">
+                                    {/* Photo when there is one; otherwise initials in the
+                                        role's hue. Square-ish like every Tile, not a circle. */}
+                                    <AvatarLightbox photoUrl={row.photoUrl} name={`${row.firstName} ${row.lastName}`} className="rounded-lg">
+                                        <UserAvatar
+                                            student={row}
+                                            size="lg"
+                                            className="rounded-lg after:rounded-lg"
+                                            fallbackClassName={cn('rounded-lg text-xs font-bold', TONE[ROLE_TONE[row.role]].soft)}
+                                        />
+                                    </AvatarLightbox>
+                                    <div className="min-w-0 space-y-1">
+                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                            <Text className="truncate font-semibold text-foreground">
                                                 {row.lastName}, {row.firstName} {row.middleName ?? ''}
                                             </Text>
                                             {row.status === 'inactive' && (
-                                                <Badge variant="secondary" className="border-transparent bg-red-100 text-red-800">
+                                                <span className="rounded-sm bg-red-100 px-1.5 py-0.5 text-caption leading-none font-semibold text-red-800 dark:bg-red-500/15 dark:text-red-300">
                                                     Inactive
-                                                </Badge>
+                                                </span>
                                             )}
                                             {row.role !== Role.Student && (
-                                                <Badge
-                                                    variant="secondary"
-                                                    className={cn('border-transparent', TONE[ROLE_TONE[row.role]].chip)}
+                                                <span
+                                                    className={cn(
+                                                        'rounded-sm px-1.5 py-0.5 text-caption leading-none font-semibold',
+                                                        TONE[ROLE_TONE[row.role]].chip,
+                                                    )}
                                                 >
                                                     {ROLE_LABEL[row.role]}
-                                                </Badge>
+                                                </span>
                                             )}
                                         </div>
-                                        <Text variant="small" className="truncate">
-                                            {row.studentNumber} · {departmentName(row.departmentId)}
-                                            {row.yearLevel ? ` · Yr ${row.yearLevel}` : ''}
-                                            {row.section ? ` · ${row.section}` : ''}
-                                        </Text>
+                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                            <span className="text-caption text-muted-foreground tabular-nums">{row.studentNumber}</span>
+                                            <span
+                                                className={cn(
+                                                    'rounded-sm px-1.5 py-0.5 text-caption leading-none font-semibold',
+                                                    TONE[deptToneFor(row.departmentId)].chip,
+                                                )}
+                                            >
+                                                {departmentName(row.departmentId)}
+                                            </span>
+                                            {(row.yearLevel || row.section) && (
+                                                <span className="text-caption text-muted-foreground">
+                                                    {[row.yearLevel ? `Yr ${row.yearLevel}` : null, row.section].filter(Boolean).join(' · ')}
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
-                                {/* Phone: the buttons sit on their own row under the
-                                    name and share its width, so the name is never
-                                    squeezed out. From sm up they go back to the
-                                    right of the row. */}
-                                <div className="flex gap-2 sm:shrink-0 sm:justify-end">
+                                {/* Phone: a full-width action bar under the row, split into
+                                    equal cells. From sm up: quiet buttons on the right. */}
+                                <div className="-mx-4 -mb-4 flex divide-x border-t sm:mx-0 sm:mb-0 sm:shrink-0 sm:divide-x-0 sm:border-t-0 sm:gap-1">
                                     {row.role !== Role.SystemAdmin && (
                                         <Button
                                             size="sm"
-                                            variant="outline"
-                                            className="flex-1 sm:flex-none"
+                                            variant="ghost"
+                                            className="h-10 flex-1 rounded-none text-muted-foreground hover:text-foreground sm:h-8 sm:flex-none sm:rounded-md"
                                             onClick={() => startEditing(row)}
                                         >
                                             Edit
@@ -930,8 +953,8 @@ export function StudentsPage() {
                                     {canAssignRoles && (
                                         <Button
                                             size="sm"
-                                            variant="outline"
-                                            className="flex-1 sm:flex-none"
+                                            variant="ghost"
+                                            className="h-10 flex-1 rounded-none text-muted-foreground hover:text-foreground sm:h-8 sm:flex-none sm:rounded-md"
                                             onClick={() => startEditingRole(row)}
                                         >
                                             Change role
@@ -940,18 +963,20 @@ export function StudentsPage() {
                                     {canResetStudentPassword(student, row) && (
                                         <Button
                                             size="sm"
-                                            variant="outline"
-                                            className="flex-1 sm:flex-none"
+                                            variant="ghost"
+                                            className="h-10 flex-1 rounded-none text-muted-foreground hover:text-foreground sm:h-8 sm:flex-none sm:rounded-md"
                                             onClick={() => setResettingPassword(row)}
                                         >
                                             Reset password
                                         </Button>
                                     )}
                                 </div>
-                            </CardContent>
+                            </div>
                         )}
-                    </Card>
+                    </div>
                 ))}
+                </div>
+                )}
 
                 {rosterPage && rosterPage.lastPage > 1 && (
                     <div className="flex items-center justify-between pt-2">

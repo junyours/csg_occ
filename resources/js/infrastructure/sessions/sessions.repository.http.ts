@@ -199,6 +199,20 @@ function toAttendanceSession(raw: RawCreatedSession): AttendanceSession {
     };
 }
 
+export interface MarkAllPresentResult {
+    sessionId: number;
+    markedPresent: number;
+    lateConverted: number;
+    alreadyPresent: number;
+}
+
+interface RawMarkAllPresentResult {
+    session_id: number;
+    marked_present: number;
+    late_converted: number;
+    already_present: number;
+}
+
 export const httpSessionsRepository = {
     // event_day_id is the EventDay this window belongs to — mirrors
     // POST /event-days/{eventDay}/sessions (SessionController::store).
@@ -219,6 +233,18 @@ export const httpSessionsRepository = {
     async endSession(sessionId: number): Promise<AttendanceSession> {
         const { data } = await httpClient.post<RawCreatedSession>(`/sessions/${sessionId}/end`);
         return toAttendanceSession(data);
+    },
+
+    // POST /sessions/{id}/mark-all-present — CSG/System Admin only, ongoing
+    // sessions only (409 otherwise). See MarkAllStudentsPresent.
+    async markAllPresent(sessionId: number): Promise<MarkAllPresentResult> {
+        const { data } = await httpClient.post<RawMarkAllPresentResult>(`/sessions/${sessionId}/mark-all-present`);
+        return {
+            sessionId: data.session_id,
+            markedPresent: data.marked_present,
+            lateConverted: data.late_converted,
+            alreadyPresent: data.already_present,
+        };
     },
 
     // event-day-window-edit-delete-plan.md §4.3a: a single check, only

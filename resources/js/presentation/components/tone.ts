@@ -25,7 +25,7 @@
  * carrying the same meaning it carries on the badges and the rings.
  */
 
-export type Tone = 'emerald' | 'amber' | 'red' | 'orange' | 'violet' | 'sky' | 'neutral';
+export type Tone = 'emerald' | 'amber' | 'red' | 'orange' | 'violet' | 'sky' | 'blue' | 'yellow' | 'maroon' | 'neutral';
 
 export interface ToneStyle {
     /** Filled tile: saturated bg, white glyph, glow in its own hue. */
@@ -123,6 +123,41 @@ export const TONE: Record<Tone, ToneStyle> = {
         wash: 'border-sky-500/20 bg-sky-500/5 dark:bg-sky-500/10',
         gradient: ['#38bdf8', '#0ea5e9'],
     },
+    /* Department primary colors — blue (BEED / BSED), yellow (BSBA) and
+       maroon (IT). Kept separate from the status hues above on purpose. */
+    blue: {
+        solid: 'bg-blue-600 text-white shadow-lg shadow-blue-600/30 dark:shadow-blue-600/20',
+        soft: 'bg-blue-600/12 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300',
+        text: 'text-blue-700 dark:text-blue-300',
+        chip: 'bg-blue-100 text-blue-800 dark:bg-blue-500/15 dark:text-blue-300',
+        bar: 'bg-blue-600',
+        dot: 'bg-blue-600',
+        stroke: 'stroke-blue-600 dark:stroke-blue-400',
+        wash: 'border-blue-600/25 bg-blue-600/5 dark:bg-blue-500/10',
+        gradient: ['#3b82f6', '#2563eb'],
+    },
+    yellow: {
+        solid: 'bg-yellow-400 text-yellow-950 shadow-lg shadow-yellow-400/30 dark:shadow-yellow-400/20',
+        soft: 'bg-yellow-400/20 text-yellow-700 dark:bg-yellow-400/15 dark:text-yellow-300',
+        text: 'text-yellow-700 dark:text-yellow-300',
+        chip: 'bg-yellow-100 text-yellow-900 dark:bg-yellow-400/15 dark:text-yellow-200',
+        bar: 'bg-yellow-400',
+        dot: 'bg-yellow-400',
+        stroke: 'stroke-yellow-400',
+        wash: 'border-yellow-400/40 bg-yellow-400/10 dark:bg-yellow-400/10',
+        gradient: ['#facc15', '#eab308'],
+    },
+    maroon: {
+        solid: 'bg-[#800000] text-white shadow-lg shadow-[#800000]/30 dark:shadow-[#800000]/20',
+        soft: 'bg-[#800000]/10 text-[#800000] dark:bg-[#b84a4a]/20 dark:text-[#e59a9a]',
+        text: 'text-[#800000] dark:text-[#e59a9a]',
+        chip: 'bg-[#800000]/10 text-[#800000] dark:bg-[#b84a4a]/20 dark:text-[#e59a9a]',
+        bar: 'bg-[#800000]',
+        dot: 'bg-[#800000]',
+        stroke: 'stroke-[#800000] dark:stroke-[#e59a9a]',
+        wash: 'border-[#800000]/25 bg-[#800000]/5 dark:bg-[#b84a4a]/10',
+        gradient: ['#a52a2a', '#800000'],
+    },
     /* The deliberate absence of color — nothing tracked, nothing owed,
        nothing to report. Reads as "quiet", not as "broken". */
     neutral: {
@@ -142,3 +177,18 @@ export const TONE: Record<Tone, ToneStyle> = {
  *  findable at a glance, not a meaningful code. Skips the four status hues
  *  so a department badge is never mistaken for a Present/Late/Missed one. */
 export const DEPARTMENT_TONES: Tone[] = ['violet', 'sky', 'orange', 'emerald'];
+
+/**
+ * A department's fixed primary color: BEED and BSED are blue, BSBA is
+ * yellow, IT (BSIT) is maroon. Every record tied to a department — a
+ * dashboard card, a student row, a department row — uses this so a
+ * department is recognisable at a glance. Unknown codes fall back to the
+ * old cycling tint (pass the row index) so a new department still gets one.
+ */
+export function departmentTone(code: string | null | undefined, fallbackIndex = 0): Tone {
+    const c = (code ?? '').toUpperCase().replace(/[^A-Z]/g, '');
+    if (c.includes('BEED') || c.includes('BSED')) return 'blue';
+    if (c.includes('BSBA') || c === 'BA') return 'yellow';
+    if (c === 'IT' || c.endsWith('IT')) return 'maroon';
+    return DEPARTMENT_TONES[fallbackIndex % DEPARTMENT_TONES.length];
+}

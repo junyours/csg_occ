@@ -17,6 +17,7 @@ import { useEvents } from '@/application/events/use-events';
 import { SemesterPicker, type SemesterSelection } from '@/presentation/components/semester-picker';
 import { SemesterGroupHeading } from '@/presentation/components/semester-group-heading';
 import type {
+    AttendanceHistorySearchBy,
     AttendanceHistorySort,
     AttendanceHistoryStatusFilter,
 } from '@/infrastructure/attendance/attendance-history.repository.http';
@@ -24,6 +25,7 @@ import {
     ATTENDANCE_STATUS_LABEL,
     AttendanceStatus,
     CHECK_TYPE_LABEL,
+    CheckType,
     ROLE_LABEL,
     Role,
     WINDOW_TYPE_LABEL,
@@ -32,6 +34,7 @@ import { cn, formatDate, formatScannedAt } from '@/lib/utils';
 import { Heading, Text } from '@/presentation/components/typography';
 import { TONE, type Tone } from '@/presentation/components/tone';
 import { UserAvatar } from '@/presentation/components/user-avatar';
+import { WINDOW_STYLE } from '@/presentation/components/window-style';
 
 // Same status→hue mapping as the dashboard (present/late/missed/excluded).
 // The row's left edge now carries the student's photo, so this hue rides on
@@ -51,6 +54,12 @@ const STATUS_ICON: Record<AttendanceStatus, LucideIcon> = {
     [AttendanceStatus.Missed]: XCircle,
     [AttendanceStatus.Excluded]: MinusCircle,
     [AttendanceStatus.Pending]: Clock,
+};
+
+/** Time In / Time Out each get their own hue so the two read apart at a glance. */
+const CHECK_TONE: Record<string, Tone> = {
+    [CheckType.TimeIn]: 'emerald',
+    [CheckType.TimeOut]: 'blue',
 };
 
 const PER_PAGE = 25;
@@ -92,6 +101,10 @@ export function AttendanceHistoryAdminPage() {
 
     const [search, setSearch] = useState('');
     const debouncedSearch = useDebouncedValue(search);
+    // Whose name the search box matches. Kept explicit because a student can
+    // also be a scanning officer — one box matching both people returned
+    // every row that person had scanned for others alongside their own.
+    const [searchBy, setSearchBy] = useState<AttendanceHistorySearchBy>('student');
 
     const [departmentFilter, setDepartmentFilter] = useState<string>('all');
     const [eventFilter, setEventFilter] = useState<string>('all');
@@ -107,6 +120,7 @@ export function AttendanceHistoryAdminPage() {
 
     const { data: historyPage, isLoading } = useAttendanceHistory({
         search: debouncedSearch || undefined,
+        searchBy: isOfficer ? 'student' : searchBy,
         departmentId: departmentFilter !== 'all' ? Number(departmentFilter) : undefined,
         eventId: eventFilter !== 'all' ? Number(eventFilter) : undefined,
         status: statusFilter,
@@ -148,8 +162,27 @@ export function AttendanceHistoryAdminPage() {
                         allowAll
                         className="w-full sm:w-64"
                     />
+                    {/* An officer's page is already only their own scans, so
+                        there is no second person to choose between. */}
+                    {!isOfficer && (
+                        <Select
+                            value={searchBy}
+                            onValueChange={(value) => {
+                                setSearchBy(value as AttendanceHistorySearchBy);
+                                setPage(1);
+                            }}
+                        >
+                            <SelectTrigger className="w-full sm:w-44" aria-label="Search by">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="student">By student</SelectItem>
+                                <SelectItem value="officer">By scanning officer</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    )}
                     <Input
-                        placeholder="Search student or scanning officer…"
+                        placeholder={!isOfficer && searchBy === 'officer' ? 'Search officer name or ID…' : 'Search student name or ID…'}
                         value={search}
                         onChange={(e) => {
                             setSearch(e.target.value);
@@ -278,6 +311,9 @@ export function AttendanceHistoryAdminPage() {
                 {historyPage?.data.map((row, index, rows) => {
                     const tone = STATUS_TONE[row.status];
                     const StatusIcon = STATUS_ICON[row.status];
+                    const windowStyle = WINDOW_STYLE[row.windowType] ?? { Icon: Clock, tone: 'neutral' as Tone };
+                    const WindowIcon = windowStyle.Icon;
+                    const checkTone = CHECK_TONE[row.checkType] ?? 'neutral';
                     // "All semesters": the server keeps each semester's rows
                     // together, so a heading goes above the first row of each
                     // run. Its subtotal covers the whole filtered set.
@@ -315,11 +351,14 @@ export function AttendanceHistoryAdminPage() {
                                                 <StatusIcon />
                                             </AvatarBadge>
                                         </UserAvatar>
+                                        {/* No truncation: a long name or the section
+                                            at the end of the meta line used to be cut
+                                            to "…". Both wrap instead. */}
                                         <div className="min-w-0">
-                                            <Text className="truncate font-medium">
+                                            <Text className="font-medium break-words">
                                                 {row.lastName}, {row.firstName}
                                             </Text>
-                                            <Text variant="small" className="truncate">
+                                            <Text variant="small" className="break-words">
                                                 {row.studentNumber}
                                                 {row.departmentCode ? ` · ${row.departmentCode}` : ''}
                                                 {row.major ? ` ${row.major}` : ''}
@@ -333,20 +372,41 @@ export function AttendanceHistoryAdminPage() {
                                     </Badge>
                                 </div>
 
-                                <Text variant="small">
-                                    {row.eventName} — Day {row.dayNumber} ({formatDate(row.date)}) ·{' '}
-                                    {WINDOW_TYPE_LABEL[row.windowType]} · {CHECK_TYPE_LABEL[row.checkType]}
-                                </Text>
+                                <div className="space-y-1">
+                                    <Text className="font-bold break-words text-foreground">{row.eventName}</Text>
+                                    <Text variant="small">
+                                        Day {row.dayNumber} ({formatDate(row.date)})
+                                    </Text>
+                                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                                        <span className={cn('inline-flex items-center gap-1.5 font-medium', TONE[windowStyle.tone].text)}>
+                                            <WindowIcon className="size-4" />
+                                            {WINDOW_TYPE_LABEL[row.windowType]}
+                                        </span>
+                                        <span className="text-muted-foreground">·</span>
+                                        <span className={cn('font-semibold', TONE[checkTone].text)}>
+                                            {CHECK_TYPE_LABEL[row.checkType]}
+                                        </span>
+                                    </div>
+                                </div>
 
                                 {/* The audit ask itself: who scanned it and when.
                                     No scan exists for Missed/Excluded/Pending
                                     rows, so there's nothing to attribute. */}
                                 <Text variant="caption">
-                                    {row.autoPresent
-                                        ? 'Auto — staff (recorded when the session ended)'
-                                        : row.scannedByName
-                                        ? `Scanned by ${row.scannedByName}${row.scannedByRole && row.scannedByRole !== Role.Officer ? ` (${ROLE_LABEL[row.scannedByRole as Role]})` : ''}${row.scannedAt ? ` on ${formatScannedAt(row.scannedAt)}` : ''}`
-                                        : 'Not scanned'}
+                                    {row.autoPresent ? (
+                                        'Auto — staff (recorded when the session ended)'
+                                    ) : row.scannedByName ? (
+                                        <>
+                                            Scanned by{' '}
+                                            <span className={cn('font-semibold', TONE.violet.text)}>{row.scannedByName}</span>
+                                            {row.scannedByRole && row.scannedByRole !== Role.Officer
+                                                ? ` (${ROLE_LABEL[row.scannedByRole as Role]})`
+                                                : ''}
+                                            {row.scannedAt ? ` on ${formatScannedAt(row.scannedAt)}` : ''}
+                                        </>
+                                    ) : (
+                                        'Not scanned'
+                                    )}
                                 </Text>
                             </CardContent>
                         </Card>

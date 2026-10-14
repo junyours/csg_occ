@@ -7,14 +7,9 @@ import {
     ChevronRight,
     Clock,
     Loader2,
-    Moon,
     ScanLine,
-    Sun,
-    Sunrise,
-    Undo2,
     X,
     XCircle,
-    type LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -43,6 +38,7 @@ import { UserAvatar } from '@/presentation/components/user-avatar';
 import { Tile } from '@/presentation/components/tile';
 import { TONE, type Tone } from '@/presentation/components/tone';
 import { cn } from '@/lib/utils';
+import { WINDOW_STYLE } from '@/presentation/components/window-style';
 
 /**
  * One-tap reasons for the reversal dialog. The officer at the gate has a
@@ -65,23 +61,16 @@ const REVERSAL_REASON_PRESETS = [
 // without this, one badge in view would fire the scan endpoint repeatedly.
 const TOKEN_COOLDOWN_MS = 3000;
 
-// The result panel (photo/name/status) now stays up until the officer
-// taps its close button or the next badge is scanned — no auto-hide
-// timer, so there's no risk of it disappearing before they've had a
-// chance to read it.
+// How long a fresh scan result (photo/name/status) stays over the viewfinder
+// before it closes itself, so it's never in the way of the next badge. A
+// result the officer deliberately reopens from "Recent scans" is NOT on
+// this timer — it stays until they close it or the next scan replaces it.
+const FEEDBACK_AUTOCLOSE_MS = 2000;
 
 const WINDOW_LABEL: Record<string, string> = {
     morning: 'Morning',
     afternoon: 'Afternoon',
     evening: 'Evening',
-};
-
-/** Window → icon + hue, matching the streak strip and the event schedule, so
- *  an officer glancing at three screens sees one vocabulary. */
-const WINDOW_STYLE: Record<string, { Icon: LucideIcon; tone: Tone }> = {
-    morning: { Icon: Sunrise, tone: 'amber' },
-    afternoon: { Icon: Sun, tone: 'orange' },
-    evening: { Icon: Moon, tone: 'violet' },
 };
 
 /**
@@ -215,6 +204,9 @@ function Scanner({
     const cooldownRef = useRef<Map<string, number>>(new Map());
 
     const [feedback, setFeedback] = useState<Feedback | null>(null);
+    // true when the officer reopened a result from "Recent scans": that one
+    // doesn't auto-close. Fresh scans always do.
+    const [feedbackSticky, setFeedbackSticky] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
     // Mirrors isProcessingRef into render state purely so the UI can show a
     // "Processing…" status. The ref is what the decode loop actually reads
@@ -222,19 +214,34 @@ function Scanner({
     // was set up once at mount) — this state is just for display.
     const [isProcessing, setIsProcessing] = useState(false);
 
-    // Stays on screen until dismissFeedback runs (manual close, or the next
-    // successful/failed scan replacing it) — no timer. Genuinely stable
-    // now: the "Recent scans" strip is populated from the server (see
-    // RecentScansPanel), refreshed by useScanAttendance's own invalidation,
-    // so this callback has nothing left to persist itself.
+    // A fresh scan result closes itself after FEEDBACK_AUTOCLOSE_MS (effect
+    // below). Stable: the "Recent scans" strip is populated from the server
+    // (see RecentScansPanel), refreshed by useScanAttendance's own
+    // invalidation, so this callback has nothing left to persist itself.
     const showFeedback = useCallback((next: Feedback) => {
         const tone = next.kind === 'success' ? resultTone(next.result) : 'bad';
+        setFeedbackSticky(false);
         setFeedback(next);
         playFeedbackTone(tone);
         vibrateForTone(tone);
     }, []);
 
     const dismissFeedback = useCallback(() => setFeedback(null), []);
+
+    // Bring a past scan back over the viewfinder (tap in "Recent scans").
+    // Silent (no beep/vibration) and sticky: no auto-close this time.
+    const reopenScan = useCallback((entry: ScanResult) => {
+        setFeedbackSticky(true);
+        setFeedback({ kind: 'success', result: entry });
+    }, []);
+
+    // Auto-close fresh results. A new scan sets a new feedback object, which
+    // restarts the timer; a reopened (sticky) result never starts one.
+    useEffect(() => {
+        if (!feedback || feedbackSticky) return;
+        const timer = window.setTimeout(() => setFeedback(null), FEEDBACK_AUTOCLOSE_MS);
+        return () => window.clearTimeout(timer);
+    }, [feedback, feedbackSticky]);
 
     // Browsers block audio until a user gesture unlocks the page — the
     // first scan is triggered by the camera, not a tap, so without this
@@ -445,20 +452,29 @@ function Scanner({
                     : "Hold each student's QR code steady in the frame, then confirm the photo matches their face."}
             </Text>
 
-            <RecentScansPanel sessionId={session.id} checkType={session.checkType} />
+            <RecentScansPanel sessionId={session.id} checkType={session.checkType} onView={reopenScan} />
         </div>
     );
 }
 
 /**
  * The "Recent scans" strip plus the officer's escape hatch for a mis-scan:
- * tap the undo icon on a row, confirm, and the record goes back to pending
+ * tap Revert on a row, confirm, and the record goes back to pending
  * server-side (see ReverseAttendanceRecord). Deliberately reads from
  * useRecentScans (server) rather than anything local, since the whole
  * point is showing what the *server* currently has for this session —
  * including rows another officer's phone already reversed.
  */
-function RecentScansPanel({ sessionId, checkType }: { sessionId: number; checkType: string }) {
+function RecentScansPanel({
+    sessionId,
+    checkType,
+    onView,
+}: {
+    sessionId: number;
+    checkType: string;
+    /** Bring this scan's details back over the viewfinder. */
+    onView: (entry: ScanResult) => void;
+}) {
     const { data: recent = [] } = useRecentScans(sessionId);
     const reverseScan = useReverseScan(sessionId);
 
@@ -479,10 +495,10 @@ function RecentScansPanel({ sessionId, checkType }: { sessionId: number; checkTy
             { recordId: target.recordId, reason: reason !== '' ? reason : undefined },
             {
                 onSuccess: () => {
-                    toast.success(`${studentFullName(target.student)} reversed — back to pending.`);
+                    toast.success(`${studentFullName(target.student)} reverted — back to pending.`);
                 },
                 onError: (error) => {
-                    toast.error(error instanceof ScanError ? error.message : 'Could not reverse this scan.');
+                    toast.error(error instanceof ScanError ? error.message : 'Could not revert this scan.');
                 },
             },
         );
@@ -501,33 +517,44 @@ function RecentScansPanel({ sessionId, checkType }: { sessionId: number; checkTy
                     {recent.map((entry) => (
                         <div
                             key={entry.recordId}
-                            className="flex items-center gap-4 rounded-2xl border bg-card p-2"
+                            className="flex items-center gap-2 rounded-[10px] border bg-card p-2"
                         >
-                            <UserAvatar student={entry.student} className="size-9" />
-                            <div className="min-w-0 flex-1">
-                                <Text className="truncate text-sm font-medium">{studentFullName(entry.student)}</Text>
-                                <Text variant="caption">{studentMeta(entry.student)}</Text>
-                            </div>
-                            <div className="flex flex-col items-end gap-2">
-                                <OutcomeBadge result={entry} checkType={checkType} />
-                                {formatScanTime(entry.scannedAt) && (
-                                    <Text variant="caption">{formatScanTime(entry.scannedAt)}</Text>
-                                )}
-                            </div>
+                            {/* Tap the student to bring their scan details back
+                                over the viewfinder (stays open this time). */}
+                            <button
+                                type="button"
+                                onClick={() => onView(entry)}
+                                aria-label={`Show scan details for ${studentFullName(entry.student)}`}
+                                className="flex min-w-0 flex-1 items-center gap-4 rounded-lg p-1 text-left transition-colors hover:bg-muted/50 active:bg-muted"
+                            >
+                                <UserAvatar student={entry.student} className="size-9" />
+                                <div className="min-w-0 flex-1">
+                                    <Text className="truncate text-sm font-medium">{studentFullName(entry.student)}</Text>
+                                    <Text variant="caption">{studentMeta(entry.student)}</Text>
+                                </div>
+                                <div className="flex flex-col items-end gap-2">
+                                    <OutcomeBadge result={entry} checkType={checkType} />
+                                    {formatScanTime(entry.scannedAt) && (
+                                        <Text variant="caption">{formatScanTime(entry.scannedAt)}</Text>
+                                    )}
+                                </div>
+                            </button>
                             {/* The officer's undo: the wrong face on the
                                 photo, a badge scanned by mistake, and so
                                 on. Same tier of permission as scanning
                                 itself (see AttendanceSessionPolicy::
                                 reverseScan) — no admin has to be flagged
                                 down for this. */}
-                            <button
+                            <Button
                                 type="button"
+                                variant="outline"
+                                size="sm"
                                 onClick={() => setRevertTarget(entry)}
-                                aria-label={`Reverse scan for ${studentFullName(entry.student)}`}
-                                className="shrink-0 rounded-xl p-2 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-600"
+                                aria-label={`Revert scan for ${studentFullName(entry.student)}`}
+                                className="shrink-0 border-red-500/40 text-red-600 hover:bg-red-500/10 hover:text-red-700"
                             >
-                                <Undo2 className="size-4" />
-                            </button>
+                                Revert
+                            </Button>
                         </div>
                     ))}
                 </div>
@@ -536,7 +563,7 @@ function RecentScansPanel({ sessionId, checkType }: { sessionId: number; checkTy
             <AlertDialog open={revertTarget !== null} onOpenChange={(open) => !open && closeDialog()}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Reverse this scan?</AlertDialogTitle>
+                        <AlertDialogTitle>Revert this scan?</AlertDialogTitle>
                         <AlertDialogDescription>
                             {revertTarget &&
                                 `${studentFullName(revertTarget.student)} will go back to pending and can be scanned again — use this when the photo didn't match the person who presented the QR code.`}
@@ -575,7 +602,7 @@ function RecentScansPanel({ sessionId, checkType }: { sessionId: number; checkTy
                     <AlertDialogFooter>
                         <AlertDialogCancel>Cancel</AlertDialogCancel>
                         <AlertDialogAction onClick={confirmRevert} className={buttonVariants({ variant: 'destructive' })}>
-                            Yes, reverse
+                            Yes, revert
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

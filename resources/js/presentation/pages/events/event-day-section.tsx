@@ -2,7 +2,7 @@ import { type FormEvent, useState } from 'react';
 import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 
-import { CalendarDays, Moon, Pencil, Plus, Sun, Sunrise, Trash2, type LucideIcon } from 'lucide-react';
+import { Pencil, Plus, Sun, Trash2 } from 'lucide-react';
 
 import {
     AlertDialog,
@@ -14,7 +14,6 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -24,24 +23,25 @@ import { useCreateSession } from '@/application/sessions/use-create-session';
 import { useDeleteSession } from '@/application/sessions/use-delete-session';
 import { useDeleteWindow } from '@/application/sessions/use-delete-window';
 import { useEndSession } from '@/application/sessions/use-end-session';
+import { useMarkAllPresent } from '@/application/sessions/use-mark-all-present';
 import { useStartSession } from '@/application/sessions/use-start-session';
 import { useUpdateSession } from '@/application/sessions/use-update-session';
 import { useDeleteEventDay } from '@/application/events/use-delete-event-day';
 import { useUpdateEventDay } from '@/application/events/use-update-event-day';
 import { useTrustedNow } from '@/application/server-time/use-server-clock';
 import type { AttendanceSession, EventDayWithSessions } from '@/domain/entities';
-import { CHECK_TYPE_LABEL, CheckType, SESSION_STATUS_BADGE_CLASS, SessionStatus, WindowType, WINDOW_TYPE_LABEL } from '@/domain/enums';
+import { CHECK_TYPE_LABEL, CheckType, SessionStatus, WindowType, WINDOW_TYPE_LABEL } from '@/domain/enums';
 import { cn, formatDate, formatTimeOfDay, sessionStartInstant } from '@/lib/utils';
 import { Text } from '@/presentation/components/typography';
+import { CHIP } from '@/presentation/components/spacing';
 import { Tile } from '@/presentation/components/tile';
 import { TONE, type Tone } from '@/presentation/components/tone';
+import { WINDOW_STYLE } from '@/presentation/components/window-style';
 
-/** Window → icon + hue. Same pairing as the dashboard's streak strip, the
- *  event schedule and the scanner, so a "Morning" row is amber everywhere. */
-const WINDOW_STYLE: Record<string, { Icon: LucideIcon; tone: Tone }> = {
-    [WindowType.Morning]: { Icon: Sunrise, tone: 'amber' },
-    [WindowType.Afternoon]: { Icon: Sun, tone: 'orange' },
-    [WindowType.Evening]: { Icon: Moon, tone: 'violet' },
+const SESSION_CHIP: Record<string, { label: string; tone: Tone }> = {
+    [SessionStatus.Scheduled]: { label: 'Scheduled', tone: 'amber' },
+    [SessionStatus.Ongoing]: { label: 'Ongoing', tone: 'emerald' },
+    [SessionStatus.Ended]: { label: 'Ended', tone: 'neutral' },
 };
 
 interface SessionFormValues {
@@ -151,6 +151,7 @@ export function EventDaySection({
     const createSession = useCreateSession(day.id);
     const startSession = useStartSession();
     const endSession = useEndSession();
+    const markAllPresent = useMarkAllPresent();
     const updateSession = useUpdateSession();
     const deleteSession = useDeleteSession();
     const deleteWindow = useDeleteWindow();
@@ -165,6 +166,13 @@ export function EventDaySection({
     const [sessionEditForm, setSessionEditForm] = useState<SessionFormValues>(EMPTY_SESSION_FORM);
     const [deletingSession, setDeletingSession] = useState<AttendanceSession | null>(null);
     const [deletingWindowType, setDeletingWindowType] = useState<string | null>(null);
+    // Ending a session is irreversible and closes scanning for everyone,
+    // so "End" only opens this confirm — handleEnd runs on confirmation.
+    const [endingSession, setEndingSession] = useState<AttendanceSession | null>(null);
+    // "Mark all students as Present" bulk-writes attendance, so it also
+    // goes through a confirm. canManage (System/CSG Admin) is exactly the
+    // server's AttendanceSessionPolicy::markAllPresent audience.
+    const [markingAllSession, setMarkingAllSession] = useState<AttendanceSession | null>(null);
 
     const dayLocked = isLocked(day.sessions);
 
@@ -179,6 +187,21 @@ export function EventDaySection({
         endSession.mutate(sessionId, {
             onSuccess: () => toast.success('Session ended.'),
             onError: () => toast.error('Could not end session.'),
+        });
+    }
+
+    function handleMarkAllPresent(sessionId: number) {
+        markAllPresent.mutate(sessionId, {
+            onSuccess: (result) => {
+                const total = result.markedPresent + result.lateConverted;
+                toast.success(
+                    total === 0
+                        ? 'No changes — every eligible student is already marked present.'
+                        : `Marked ${total} student${total === 1 ? '' : 's'} present` +
+                              (result.lateConverted > 0 ? ` (${result.lateConverted} late → present).` : '.'),
+                );
+            },
+            onError: (error) => toast.error(extractErrorMessage(error, 'Could not mark students as present.')),
         });
     }
 
@@ -386,31 +409,30 @@ export function EventDaySection({
         .filter((group) => group.sessions.length > 0);
 
     return (
-        <div className="space-y-4 rounded-3xl border border-border bg-card p-4">
+        <div className="space-y-4">
             <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                    <Tile tone="sky" size="sm" variant="soft" Icon={CalendarDays} />
-                    <div className="min-w-0">
-                        <Text variant="small" className="font-medium text-foreground">
-                            Day {day.dayNumber}
-                        </Text>
-                        <Text variant="caption">{formatDate(day.date)}</Text>
-                    </div>
+                <div className="min-w-0">
+                    <Text variant="small" className="font-semibold text-foreground">
+                        {formatDate(day.date)}
+                    </Text>
+                    <Text variant="caption">
+                        Day {day.dayNumber} · {day.sessions.length} {day.sessions.length === 1 ? 'session' : 'sessions'}
+                    </Text>
                 </div>
 
                 {canManage && !dayLocked && (
                     <div className="flex shrink-0 gap-1">
-                        <Button size="icon" variant="ghost" className="size-7 text-muted-foreground" onClick={openEditDay} aria-label="Edit day">
-                            <Pencil className="size-3.5" />
+                        <Button size="icon" variant="ghost" className="size-8 text-muted-foreground" onClick={openEditDay} aria-label="Edit day">
+                            <Pencil className="size-4" />
                         </Button>
                         <Button
                             size="icon"
                             variant="ghost"
-                            className="size-7 text-muted-foreground hover:text-destructive"
+                            className="size-8 text-muted-foreground hover:text-destructive"
                             onClick={() => setIsDeletingDay(true)}
                             aria-label="Delete day"
                         >
-                            <Trash2 className="size-3.5" />
+                            <Trash2 className="size-4" />
                         </Button>
                     </div>
                 )}
@@ -456,35 +478,56 @@ export function EventDaySection({
                                 const sessionStartsAt = sessionStartInstant(day.date, session.startTime);
                                 const startNotYetOpen = isScheduled && trustedNow < sessionStartsAt;
 
+                                const chip = SESSION_CHIP[session.status] ?? SESSION_CHIP[SessionStatus.Scheduled];
+                                const hasActions = canManage && (isScheduled || isOngoing);
+
                                 return (
-                                    <div
-                                        key={session.id}
-                                        className={cn(
-                                            'flex items-center justify-between gap-4 rounded-2xl border border-border p-4',
-                                            // Only the running session is filled and washed.
-                                            // Everything else on the day stays quiet.
-                                            isOngoing && TONE.emerald.wash,
-                                        )}
-                                    >
-                                        <div className="flex min-w-0 items-center gap-4">
-                                            <Tile tone={windowStyle.tone} variant={isOngoing ? 'solid' : 'soft'} Icon={windowStyle.Icon} />
-                                            <div className="min-w-0">
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    <Text variant="small" className="font-medium text-foreground">
-                                                        {WINDOW_TYPE_LABEL[session.windowType]} · {CHECK_TYPE_LABEL[session.checkType]}
-                                                    </Text>
-                                                    <Badge variant="secondary" className={SESSION_STATUS_BADGE_CLASS[session.status]}>
-                                                        {session.status}
-                                                    </Badge>
-                                                </div>
-                                                <Text variant="caption">
-                                                    {formatTimeOfDay(session.startTime)}–{formatTimeOfDay(session.endTime)}
-                                                    {session.graceMinutes ? ` · +${session.graceMinutes}m grace` : ''}
+                                    <div key={session.id} className={cn('rounded-lg border px-4 py-2', isOngoing && TONE.emerald.wash)}>
+                                        <div className="flex items-center gap-3">
+                                            <Tile
+                                                tone={windowStyle.tone}
+                                                size="sm"
+                                                variant={isOngoing ? 'solid' : 'soft'}
+                                                Icon={windowStyle.Icon}
+                                                className={isOngoing ? '[&>svg]:animate-pulse' : undefined}
+                                            />
+                                            <div className="min-w-0 flex-1">
+                                                <Text variant="small" className="truncate font-medium text-foreground">
+                                                    {WINDOW_TYPE_LABEL[session.windowType]}
                                                 </Text>
+                                                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                                    <span
+                                                        className={cn(
+                                                            'inline-flex items-center rounded-md px-2 py-0.5 text-caption leading-none font-medium whitespace-nowrap',
+                                                            TONE[windowStyle.tone].soft,
+                                                        )}
+                                                    >
+                                                        {CHECK_TYPE_LABEL[session.checkType]}
+                                                    </span>
+                                                    <span className="text-caption whitespace-nowrap text-muted-foreground tabular-nums">
+                                                        {formatTimeOfDay(session.startTime)} – {formatTimeOfDay(session.endTime)}
+                                                        {session.graceMinutes ? ` · +${session.graceMinutes}m grace` : ''}
+                                                    </span>
+                                                </div>
                                             </div>
+                                            <span className={cn(CHIP, 'h-7 px-3', TONE[chip.tone].chip)}>
+                                                <span className="relative flex size-2">
+                                                    {isOngoing && (
+                                                        <span
+                                                            className={cn(
+                                                                'absolute inline-flex size-full animate-ping rounded-full opacity-75',
+                                                                TONE[chip.tone].dot,
+                                                            )}
+                                                        />
+                                                    )}
+                                                    <span className={cn('relative inline-flex size-2 rounded-full', TONE[chip.tone].dot)} />
+                                                </span>
+                                                {chip.label}
+                                            </span>
                                         </div>
 
-                                        <div className="flex shrink-0 items-center gap-1">
+                                        {hasActions && (
+                                            <div className="mt-2 flex flex-wrap items-center justify-end gap-1 border-t border-dashed pt-2">
                                             {canManage && isScheduled && (
                                                 <>
                                                     <Button
@@ -536,14 +579,26 @@ export function EventDaySection({
                                             {canManage && isOngoing && (
                                                 <Button
                                                     size="sm"
+                                                    variant="outline"
+                                                    onClick={() => setMarkingAllSession(session)}
+                                                    disabled={markAllPresent.isPending}
+                                                >
+                                                    {markAllPresent.isPending ? 'Marking…' : 'Mark all students as Present'}
+                                                </Button>
+                                            )}
+
+                                            {canManage && isOngoing && (
+                                                <Button
+                                                    size="sm"
                                                     variant="destructive"
-                                                    onClick={() => handleEnd(session.id)}
+                                                    onClick={() => setEndingSession(session)}
                                                     disabled={endSession.isPending}
                                                 >
                                                     {endSession.isPending ? 'Ending…' : 'End'}
                                                 </Button>
                                             )}
-                                        </div>
+                                            </div>
+                                        )}
                                     </div>
                                 );
                             })}
@@ -736,6 +791,55 @@ export function EventDaySection({
             </Dialog>
 
             {/* Delete day */}
+            <AlertDialog open={markingAllSession !== null} onOpenChange={(open) => !open && setMarkingAllSession(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Mark all students as Present?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {markingAllSession
+                                ? `Every eligible student in ${WINDOW_TYPE_LABEL[markingAllSession.windowType]} · ${CHECK_TYPE_LABEL[markingAllSession.checkType]} (Day ${day.dayNumber}) will be marked Present. Students already marked Present are not changed, Late students become Present, and excluded students stay as they are. Officers and admins are marked automatically when the session ends.`
+                                : ''}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={() => {
+                                if (markingAllSession) handleMarkAllPresent(markingAllSession.id);
+                                setMarkingAllSession(null);
+                            }}
+                        >
+                            Yes, mark all present
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            <AlertDialog open={endingSession !== null} onOpenChange={(open) => !open && setEndingSession(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>End this session?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {endingSession
+                                ? `${WINDOW_TYPE_LABEL[endingSession.windowType]} · ${CHECK_TYPE_LABEL[endingSession.checkType]} (Day ${day.dayNumber}) will stop accepting scans right away. This can't be undone.`
+                                : ''}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={() => {
+                                if (endingSession) handleEnd(endingSession.id);
+                                setEndingSession(null);
+                            }}
+                            className={buttonVariants({ variant: 'destructive' })}
+                        >
+                            Yes, end session
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
             <AlertDialog open={isDeletingDay} onOpenChange={setIsDeletingDay}>
                 <AlertDialogContent>
                     <AlertDialogHeader>

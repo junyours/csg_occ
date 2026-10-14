@@ -207,7 +207,7 @@ export function MasterReportPage() {
                                         <CardContent>
                                             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                                                 {EVENT_STAT_CONFIG.map(({ key, label, tone, Icon }) => (
-                                                    <StatTile key={key} label={label} value={event[key]} Icon={Icon} tone={tone} />
+                                                    <StatTile key={key} size="sm" label={label} value={event[key]} Icon={Icon} tone={tone} />
                                                 ))}
                                             </div>
                                         </CardContent>

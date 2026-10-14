@@ -31,7 +31,7 @@ final class BuildAttendanceHistory
      * @param array{
      *     department_id?: int, major?: string, year_level?: string, section?: string,
      *     event_id?: int, status?: 'all'|'present'|'late'|'missed'|'excluded',
-     *     search?: string, sort?: 'recent'|'name'|'course'|'year_level'|'section'|'major'|'event',
+     *     search?: string, search_by?: 'student'|'officer', sort?: 'recent'|'name'|'course'|'year_level'|'section'|'major'|'event',
      *     per_page?: int, scanned_by?: int,
      * } $filters
      */
@@ -161,18 +161,27 @@ final class BuildAttendanceHistory
 
         if (! empty($filters['search'])) {
             $term = '%'.$filters['search'].'%';
-            // "who scan him" — search matches either the attendee or the
-            // scanning officer, since an admin auditing a suspicious scan
-            // might start from either name.
-            $query->where(function (Builder $outer) use ($term) {
-                $outer->where('students.student_number', 'like', $term)
-                    ->orWhere('students.last_name', 'like', $term)
-                    ->orWhere('students.first_name', 'like', $term)
-                    ->orWhereHas('scannedBy', function (Builder $scannerQuery) use ($term) {
-                        $scannerQuery->where('last_name', 'like', $term)
+
+            // Which person the text is matched against is the caller's
+            // explicit choice. It used to match the attendee OR the scanning
+            // officer at once, so searching a student who also scans as an
+            // officer returned every row that person had scanned for others
+            // on top of their own attendance. Default stays "student".
+            if (($filters['search_by'] ?? 'student') === 'officer') {
+                $query->whereHas('scannedBy', function (Builder $scannerQuery) use ($term) {
+                    $scannerQuery->where(function (Builder $match) use ($term) {
+                        $match->where('student_number', 'like', $term)
+                            ->orWhere('last_name', 'like', $term)
                             ->orWhere('first_name', 'like', $term);
                     });
-            });
+                });
+            } else {
+                $query->where(function (Builder $match) use ($term) {
+                    $match->where('students.student_number', 'like', $term)
+                        ->orWhere('students.last_name', 'like', $term)
+                        ->orWhere('students.first_name', 'like', $term);
+                });
+            }
         }
 
         return $query;

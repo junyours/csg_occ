@@ -17,8 +17,15 @@ export interface DashboardSessionCounts {
     late: number;
     missed: number;
     excluded: number;
+    /** Staff Present written automatically at session end (no scan). Already inside `present`. */
+    auto: number;
     pending: number;
     totalStudents: number;
+}
+
+/** Counts for one already-ended session, keyed by the session they belong to. */
+export interface DashboardEndedSessionCounts extends DashboardSessionCounts {
+    sessionId: number;
 }
 
 /**
@@ -57,6 +64,8 @@ export interface DashboardDepartmentAttendance {
     departmentId: number;
     departmentName: string;
     departmentCode: string;
+    /** Uploaded department logo, if any — shown instead of the initials. */
+    departmentLogoUrl: string | null;
     present: number;
     late: number;
     missed: number;
@@ -123,6 +132,8 @@ export interface AdminDashboardSummary {
     eventsCount: number;
     activeSession: DashboardActiveSession | null;
     activeSessionCounts: DashboardSessionCounts | null;
+    /** Every ended session of a still-open event, for the schedule's "View details" summary. */
+    endedSessionCounts: DashboardEndedSessionCounts[];
     overallAttendanceCounts: DashboardOverallCounts;
     /** The same all-time counts, broken down per department, highest first. */
     attendanceByDepartment: DashboardDepartmentAttendance[];
@@ -179,8 +190,13 @@ interface RawSessionCounts {
     late: number;
     missed: number;
     excluded: number;
+    auto?: number;
     pending: number;
     total_students: number;
+}
+
+interface RawEndedSessionCounts extends RawSessionCounts {
+    session_id: number;
 }
 
 interface RawOverallCounts {
@@ -200,6 +216,7 @@ interface RawDepartmentAttendance {
     department_id: number;
     department_name: string;
     department_code: string;
+    department_logo_url?: string | null;
     present: number;
     late: number;
     missed: number;
@@ -247,6 +264,7 @@ interface RawDashboardSummary {
     events_count?: number;
     active_session: RawActiveSession | null;
     active_session_counts?: RawSessionCounts | null;
+    ended_session_counts?: RawEndedSessionCounts[];
     overall_attendance_counts?: RawOverallCounts;
     attendance_by_department?: RawDepartmentAttendance[];
     penalty_total?: number;
@@ -284,12 +302,13 @@ function toSessionCounts(raw: RawSessionCounts | null | undefined): DashboardSes
         late: raw.late,
         missed: raw.missed,
         excluded: raw.excluded,
+        auto: raw.auto ?? 0,
         pending: raw.pending,
         totalStudents: raw.total_students,
     };
 }
 
-function toStreakLeaderboard(raw: RawStreakLeaderboardEntry[] | undefined): DashboardStreakLeaderboardEntry[] {
+export function toStreakLeaderboard(raw: RawStreakLeaderboardEntry[] | undefined): DashboardStreakLeaderboardEntry[] {
     return (raw ?? []).map((row) => ({
         rank: row.rank,
         studentId: row.student_id,
@@ -351,11 +370,16 @@ function toDashboardSummary(raw: RawDashboardSummary): DashboardSummary {
         eventsCount: raw.events_count ?? 0,
         activeSession,
         activeSessionCounts: toSessionCounts(raw.active_session_counts),
+        endedSessionCounts: (raw.ended_session_counts ?? []).map((row) => ({
+            ...toSessionCounts(row)!,
+            sessionId: row.session_id,
+        })),
         overallAttendanceCounts: raw.overall_attendance_counts ?? { present: 0, late: 0, missed: 0 },
         attendanceByDepartment: (raw.attendance_by_department ?? []).map((row) => ({
             departmentId: row.department_id,
             departmentName: row.department_name,
             departmentCode: row.department_code,
+            departmentLogoUrl: row.department_logo_url ?? null,
             present: row.present,
             late: row.late,
             missed: row.missed,
@@ -380,7 +404,86 @@ function toDashboardSummary(raw: RawDashboardSummary): DashboardSummary {
     };
 }
 
+/**
+ * Present / Late / Missed / Excluded as plain counts for one event (and
+ * optionally one day of it) — see the backend's BuildAttendanceBreakdown.
+ * `tracked` is present + late + missed; `excluded` sits beside it, not
+ * inside it. percentageOfOverall is this department's share of `tracked`.
+ */
+export interface AttendanceCounts {
+    present: number;
+    late: number;
+    missed: number;
+    excluded: number;
+}
+
+export interface DepartmentAttendanceBreakdown extends AttendanceCounts {
+    departmentId: number;
+    departmentName: string;
+    departmentCode: string;
+    departmentLogoUrl: string | null;
+    tracked: number;
+    percentageOfOverall: number;
+}
+
+export interface AttendanceBreakdown {
+    overall: AttendanceCounts;
+    byDepartment: DepartmentAttendanceBreakdown[];
+}
+
+export interface AttendanceBreakdownParams {
+    /** null/omitted = every event in the semester scope. */
+    eventId?: number | null;
+    /** Only meaningful together with eventId. null/omitted = every day. */
+    eventDayId?: number | null;
+    /** Only used when no event is given. */
+    semester?: number | 'all' | null;
+}
+
+interface RawAttendanceBreakdown {
+    overall: AttendanceCounts;
+    by_department: Array<{
+        department_id: number;
+        department_name: string;
+        department_code: string;
+        department_logo_url: string | null;
+        present: number;
+        late: number;
+        missed: number;
+        excluded: number;
+        tracked: number;
+        percentage_of_overall: number;
+    }>;
+}
+
 export const httpDashboardRepository = {
+    async attendanceBreakdown({ eventId, eventDayId, semester }: AttendanceBreakdownParams): Promise<AttendanceBreakdown> {
+        const { data } = await httpClient.get<RawAttendanceBreakdown>('/dashboard/attendance-breakdown', {
+            params: {
+                ...(eventId ? { event_id: eventId } : {}),
+                ...(eventId && eventDayId ? { event_day_id: eventDayId } : {}),
+                ...(!eventId && semester === 'all' ? { scope: 'all' } : {}),
+                ...(!eventId && typeof semester === 'number' ? { semester_id: semester } : {}),
+            },
+        });
+
+        return {
+            overall: data.overall,
+            byDepartment: data.by_department.map((row) => ({
+                departmentId: row.department_id,
+                departmentName: row.department_name,
+                departmentCode: row.department_code,
+                departmentLogoUrl: row.department_logo_url,
+                present: row.present,
+                late: row.late,
+                missed: row.missed,
+                excluded: row.excluded,
+                tracked: row.tracked,
+                percentageOfOverall: row.percentage_of_overall,
+            })),
+        };
+    },
+
     /** `semester`: omitted/null = current; a number = that semester; 'all' = every semester (admins only). */
     async summary(semester?: number | 'all' | null): Promise<DashboardSummary> {
         const { data } = await httpClient.get<RawDashboardSummary>('/dashboard', {

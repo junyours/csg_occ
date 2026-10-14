@@ -111,4 +111,15 @@ class AttendanceSessionPolicy
     {
         return in_array($user->role, [Role::SystemAdmin, Role::CsgAdmin], true);
     }
+
+    /**
+     * "Mark all students as Present" on an ongoing session — a bulk
+     * override of the gate, so it is limited to the same two roles that
+     * start and end sessions (CSG Admin and System Admin). Officers and
+     * SC Admins can scan but never bulk-mark.
+     */
+    public function markAllPresent(Student $user): bool
+    {
+        return in_array($user->role, [Role::SystemAdmin, Role::CsgAdmin], true);
+    }
 }

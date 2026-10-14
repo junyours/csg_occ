@@ -21,6 +21,32 @@ export const CheckType = {
 } as const;
 export type CheckType = (typeof CheckType)[keyof typeof CheckType];
 
+/**
+ * The one canonical order sessions are shown in, everywhere: Morning Time In,
+ * Morning Time Out, Afternoon Time In, Afternoon Time Out, Evening Time In,
+ * Evening Time Out. The API hands sessions back in creation (id) order, so
+ * whichever one an admin happened to create first used to float to the top.
+ */
+const WINDOW_ORDER: Record<string, number> = {
+    [WindowType.Morning]: 0,
+    [WindowType.Afternoon]: 1,
+    [WindowType.Evening]: 2,
+};
+const CHECK_ORDER: Record<string, number> = {
+    [CheckType.TimeIn]: 0,
+    [CheckType.TimeOut]: 1,
+};
+
+export function compareSessionOrder(
+    a: { windowType: string; checkType: string },
+    b: { windowType: string; checkType: string },
+): number {
+    return (
+        (WINDOW_ORDER[a.windowType] ?? 99) - (WINDOW_ORDER[b.windowType] ?? 99) ||
+        (CHECK_ORDER[a.checkType] ?? 99) - (CHECK_ORDER[b.checkType] ?? 99)
+    );
+}
+
 export const SessionStatus = {
     Scheduled: 'scheduled',
     Ongoing: 'ongoing',

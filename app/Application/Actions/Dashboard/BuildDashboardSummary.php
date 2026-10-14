@@ -4,6 +4,8 @@ namespace App\Application\Actions\Dashboard;
 
 use App\Application\Actions\Attendance\BuildStreakLeaderboard;
 use App\Application\Actions\Attendance\ComputeAttendanceStreaks;
+use App\Domain\Enums\AttendanceStatus;
+use App\Domain\Enums\EventStatus;
 use App\Domain\Enums\Role;
 use App\Domain\Enums\SessionStatus;
 use App\Domain\Support\CurrentSemester;
@@ -90,6 +92,7 @@ final class BuildDashboardSummary
             'events_count' => SemesterScope::events(EventModel::query(), $scopeId)->count(),
             'active_session' => $this->describeSession($session),
             'active_session_counts' => $session ? $this->sessionCounts($session, $departmentId) : null,
+            'ended_session_counts' => $this->endedSessionCounts($departmentId),
             'overall_attendance_counts' => $this->overallAttendanceCounts($departmentId, $scopeId),
             'attendance_by_department' => $this->attendanceByDepartment($departmentId, $scopeId),
             'penalty_total' => $this->penaltyTotal($departmentId, $scopeId),
@@ -293,14 +296,44 @@ final class BuildDashboardSummary
         $missed = (int) ($recordCounts['missed'] ?? 0);
         $pending = $rosterIds->count() - $present - $late - $missed - $excludedCount;
 
+        // Staff (officers / CSG / SC) whose Present EndSession wrote
+        // automatically, with no scan. Already inside `present` — this is
+        // the "of which auto" figure, never an extra bucket.
+        $autoCount = AttendanceRecord::where('session_id', $session->id)
+            ->whereIn('student_id', $rosterIds)
+            ->where('status', AttendanceStatus::Present->value)
+            ->where('auto_present', true)
+            ->count();
+
         return [
             'present' => $present,
             'late' => $late,
             'missed' => $missed,
             'excluded' => $excludedCount,
+            'auto' => $autoCount,
             'pending' => max($pending, 0),
             'total_students' => $rosterIds->count(),
         ];
+    }
+
+    /**
+     * Per-session summary for every session that has already ended inside an
+     * event that is still open — exactly the rows the dashboard's event
+     * schedule shows as "Ended", so each can offer a "View details" count
+     * without a request per row. A list (not an id-keyed map) so an empty
+     * result serialises as [] rather than flipping between [] and {}.
+     *
+     * @return list<array<string, int>>
+     */
+    private function endedSessionCounts(?int $departmentId): array
+    {
+        return AttendanceSession::with('eventDay.event')
+            ->where('status', SessionStatus::Ended)
+            ->whereHas('eventDay.event', fn ($q) => $q->where('status', EventStatus::Ongoing->value))
+            ->orderBy('id')
+            ->get()
+            ->map(fn (AttendanceSession $session) => ['session_id' => $session->id] + $this->sessionCounts($session, $departmentId))
+            ->all();
     }
 
     /**
@@ -347,7 +380,7 @@ final class BuildDashboardSummary
      * set) this naturally collapses to their one department at 100%,
      * same as every other scoped total in this class.
      *
-     * @return array<int, array{department_id: int, department_name: string, department_code: string, present: int, late: int, missed: int, tracked: int, percentage_of_overall: float}>
+     * @return array<int, array{department_id: int, department_name: string, department_code: string, department_logo_url: ?string, present: int, late: int, missed: int, tracked: int, percentage_of_overall: float}>
      */
     private function attendanceByDepartment(?int $departmentId, ?int $scopeId): array
     {
@@ -359,11 +392,12 @@ final class BuildDashboardSummary
                 'departments.id as department_id',
                 'departments.name as department_name',
                 'departments.code as department_code',
+                'departments.logo_path as department_logo_path',
                 DB::raw("sum(case when attendance_records.status = 'present' then 1 else 0 end) as present"),
                 DB::raw("sum(case when attendance_records.status = 'late' then 1 else 0 end) as late"),
                 DB::raw("sum(case when attendance_records.status = 'missed' then 1 else 0 end) as missed"),
             )
-            ->groupBy('departments.id', 'departments.name', 'departments.code')
+            ->groupBy('departments.id', 'departments.name', 'departments.code', 'departments.logo_path')
             ->get();
 
         $overallTracked = $rows->sum(fn ($row) => (int) $row->present + (int) $row->late + (int) $row->missed);
@@ -376,6 +410,9 @@ final class BuildDashboardSummary
                     'department_id' => (int) $row->department_id,
                     'department_name' => $row->department_name,
                     'department_code' => $row->department_code,
+                    'department_logo_url' => $row->department_logo_path
+                        ? \Illuminate\Support\Facades\Storage::disk('public')->url($row->department_logo_path)
+                        : null,
                     'present' => (int) $row->present,
                     'late' => (int) $row->late,
                     'missed' => (int) $row->missed,

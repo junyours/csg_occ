@@ -5,6 +5,7 @@ use App\Http\Controllers\Attendance\AttendanceHistoryController;
 use App\Http\Controllers\Attendance\AttendanceHistoryFilterOptionsController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
+use App\Http\Controllers\Dashboard\AttendanceBreakdownController;
 use App\Http\Controllers\Dashboard\DashboardController;
 use App\Http\Controllers\Departments\DepartmentController;
 use App\Http\Controllers\Departments\DepartmentLogoController;
@@ -16,6 +17,7 @@ use App\Http\Controllers\Events\EventMyAttendanceController;
 use App\Http\Controllers\Events\EventRosterReportController;
 use App\Http\Controllers\Events\MyAttendanceHistoryController;
 use App\Http\Controllers\Events\RescheduleEventDaysController;
+use App\Http\Controllers\Leaderboard\LeaderboardController;
 use App\Http\Controllers\Exclusions\ExclusionBulkImportController;
 use App\Http\Controllers\Exclusions\ExclusionBulkImportPreviewController;
 use App\Http\Controllers\Exclusions\ExclusionController;
@@ -29,6 +31,7 @@ use App\Http\Controllers\Reports\RosterReportGenerationController;
 use App\Http\Controllers\Semesters\SemesterController;
 use App\Http\Controllers\ServerTime\ServerTimeController;
 use App\Http\Controllers\Sessions\EndSessionController;
+use App\Http\Controllers\Sessions\MarkAllPresentController;
 use App\Http\Controllers\Sessions\RecentScansController;
 use App\Http\Controllers\Sessions\ReverseScanController;
 use App\Http\Controllers\Sessions\ScanController;
@@ -88,6 +91,16 @@ Route::middleware(['auth:sanctum', 'account.active', 'throttle:api'])->group(fun
         Route::middleware('photo.uploaded')->group(function () {
             Route::get('/dashboard', [DashboardController::class, 'show']);
 
+            // Admin dashboard's attendance cards (overall ring + per
+            // department), scoped to one event and optionally one day of
+            // it. Its own endpoint so flipping the event/day filter
+            // refetches just these numbers, not the whole dashboard.
+            Route::get('/dashboard/attendance-breakdown', [AttendanceBreakdownController::class, 'show']);
+
+            // School-wide streak leaderboard (Overall / Today / Session),
+            // top 20 + the caller's own rank — see BuildLeaderboard.
+            Route::get('/leaderboard', [LeaderboardController::class, 'show']);
+
             Route::post('/sessions/{session}/scan', [ScanController::class, 'store']);
 
             // The scanning screen's own two companions to the scan endpoint,
@@ -109,6 +122,8 @@ Route::middleware(['auth:sanctum', 'account.active', 'throttle:api'])->group(fun
 
             Route::post('/sessions/{session}/start', [StartSessionController::class, 'store']);
             Route::post('/sessions/{session}/end', [EndSessionController::class, 'store']);
+            // Bulk-present every eligible student of an ongoing session (CSG/System Admin only).
+            Route::post('/sessions/{session}/mark-all-present', [MarkAllPresentController::class, 'store']);
             Route::get('/sessions/{session}/report', [SessionReportController::class, 'show']);
 
             // event-day-window-edit-delete-plan.md §4.3: edit or delete a

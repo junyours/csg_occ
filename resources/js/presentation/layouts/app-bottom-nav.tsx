@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download } from 'lucide-react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { CalendarDays, LayoutDashboard, QrCode, ScanLine, Settings } from 'lucide-react';
+import { CalendarDays, LayoutDashboard, QrCode, ScanLine, Settings, Trophy } from 'lucide-react';
 
+import { useLeaderboard } from '@/application/leaderboard/use-leaderboard';
 import { useStudentQr } from '@/application/students/use-student-qr';
 
 import { Role, ROLE_LABEL } from '@/domain/enums';
 import type { Student } from '@/domain/entities';
+import { parseLeaderboardScope } from '@/infrastructure/leaderboard/leaderboard.repository.http';
 import { UserAvatar } from '@/presentation/components/user-avatar';
 import { cn } from '@/lib/utils';
 
@@ -35,6 +37,18 @@ export function AppBottomNav({ student }: { student: Student }) {
     // read from the same react-query cache entry.
     const isProfile = location.pathname.startsWith('/profile');
     const { save: saveQrCode, isLoading: qrCodeLoading } = useStudentQr(student.id);
+
+    // On the Leaderboard screen the collapsed pill shows the student's own
+    // rank for whichever tab is open ("#2234 You") instead of the screen
+    // name. Same query key as the page itself, so this is a cache read, not
+    // a second request; and only plain students are ranked, so for everyone
+    // else the query never runs and the pill just says "Leaderboard".
+    const isLeaderboard = location.pathname.startsWith('/leaderboard');
+    const { data: leaderboard } = useLeaderboard(
+        parseLeaderboardScope(new URLSearchParams(location.search).get('scope')),
+        isLeaderboard && role === Role.Student,
+    );
+    const rankLabel = isLeaderboard && leaderboard?.me ? `#${leaderboard.me.rank.toLocaleString()} You` : null;
 
     const items: NavItem[] = [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }];
 
@@ -70,10 +84,11 @@ export function AppBottomNav({ student }: { student: Student }) {
     const SETTINGS_SUBROUTES = ['/reports', '/students', '/academic-years', '/departments', '/penalties'];
     const isSettingsSubroute = SETTINGS_SUBROUTES.some((route) => location.pathname.startsWith(route));
 
-    const current =
-        [...items].sort((a, b) => b.to.length - a.to.length).find((item) => location.pathname.startsWith(item.to)) ??
-        (isSettingsSubroute ? items.find((item) => item.to === '/settings') : undefined) ??
-        items[0];
+    const current: NavItem = isLeaderboard
+        ? { to: '/leaderboard', label: 'Leaderboard', icon: Trophy }
+        : ([...items].sort((a, b) => b.to.length - a.to.length).find((item) => location.pathname.startsWith(item.to)) ??
+          (isSettingsSubroute ? items.find((item) => item.to === '/settings') : undefined) ??
+          items[0]);
 
     // Whether there's actually somewhere to go back to. react-router's data
     // router stores a history index in history.state.idx — 0 (or missing,
@@ -261,7 +276,7 @@ export function AppBottomNav({ student }: { student: Student }) {
                             type="button"
                             transition={MORPH_TRANSITION}
                             onClick={() => setOpen(true)}
-                            aria-label={`Currently on ${current.label}. Tap to open navigation.`}
+                            aria-label={`Currently on ${rankLabel ?? current.label}. Tap to open navigation.`}
                             className="flex items-center gap-2 rounded-full bg-primary py-2 pr-2 pl-2 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.35)]"
                         >
                             <UserAvatar student={student} className="size-7" />
@@ -271,8 +286,8 @@ export function AppBottomNav({ student }: { student: Student }) {
                                 <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
                             </span>
 
-                            <span className="pr-0.5 text-sm font-medium whitespace-nowrap text-primary-foreground">
-                                {current.label}
+                            <span className="pr-0.5 text-sm font-medium whitespace-nowrap tabular-nums text-primary-foreground">
+                                {rankLabel ?? current.label}
                             </span>
 
                             <span className="flex items-center gap-2 rounded-full bg-primary-foreground/10 py-2 pr-2 pl-2 text-primary-foreground/70">

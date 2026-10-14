@@ -61,7 +61,7 @@ export function AccountPage() {
               login screen and the QR card use — the three places in the app
               that are about *who you are* rather than what's happening.
             */}
-            <div className="relative overflow-hidden rounded-3xl border bg-card p-6">
+            <div className="relative overflow-hidden rounded-[10px] border bg-card p-6">
                 <span
                     aria-hidden
                     className="pointer-events-none absolute -top-20 left-1/2 size-64 -translate-x-1/2 rounded-full bg-violet-500 opacity-[0.07] blur-3xl dark:opacity-[0.12]"

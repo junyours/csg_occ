@@ -1,25 +1,20 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Clock, Moon, Radio, Sun, Sunrise, type LucideIcon } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { ArrowRight, ChevronDown, Clock, Radio } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import type { EventWithDays } from '@/domain/entities';
-import { AttendanceStatus, CHECK_TYPE_LABEL, SessionStatus, WINDOW_TYPE_LABEL, type WindowType } from '@/domain/enums';
+import { pickDefaultDay, sortDaysByDate } from '@/domain/default-day';
+import type { DashboardSessionCounts } from '@/infrastructure/dashboard/dashboard.repository.http';
+import { AttendanceStatus, CHECK_TYPE_LABEL, EventStatus, SessionStatus, WINDOW_TYPE_LABEL } from '@/domain/enums';
 import { cn, formatDate, formatTimeOfDay } from '@/lib/utils';
-import { CARD, CHIP, GAP, STACK, TAP_SM } from '@/presentation/components/spacing';
+import { CARD, CHIP, GAP, STACK } from '@/presentation/components/spacing';
 import { AnimatedCounter } from '@/presentation/components/dashboard/animated-counter';
+import { ScrollableTabList } from '@/presentation/components/scrollable-tab-list';
 import { Tile } from '@/presentation/components/tile';
 import { TONE, type Tone } from '@/presentation/components/tone';
 import { Text } from '@/presentation/components/typography';
-
-/** Window → a sky icon and its own hue, so a row says "morning / afternoon /
- *  evening" before any of it is read. Matches the badges on the streak strip. */
-const WINDOW_STYLE: Record<WindowType, { Icon: LucideIcon; tone: Tone }> = {
-    morning: { Icon: Sunrise, tone: 'amber' },
-    afternoon: { Icon: Sun, tone: 'orange' },
-    evening: { Icon: Moon, tone: 'violet' },
-};
+import { WINDOW_STYLE } from '@/presentation/components/window-style';
 
 // "Soon"/"Ongoing"/"Ended" per the spec's own wording, rather than
 // re-showing the backend's "Scheduled" label — Soon is the plainer read
@@ -38,6 +33,88 @@ const ATTENDANCE_STATUS_CHIP: Partial<Record<AttendanceStatus, { label: string; 
 };
 
 /**
+ * The five numbers an ended session is summarised by. `auto` is the staff
+ * (officer / CSG / SC) Present that EndSession wrote without a scan — it is
+ * already inside Present, so it is shown as "of which", never added on.
+ */
+const SUMMARY_STATS: Array<{ key: 'present' | 'late' | 'missed' | 'excluded' | 'auto'; label: string; tone: Tone }> = [
+    { key: 'present', label: 'Present', tone: 'emerald' },
+    { key: 'late', label: 'Late', tone: 'amber' },
+    { key: 'missed', label: 'Missed', tone: 'red' },
+    { key: 'excluded', label: 'Excluded', tone: 'neutral' },
+    { key: 'auto', label: 'Auto', tone: 'violet' },
+];
+
+/** "1:00 PM → 1:30 PM" that can only ever wrap *between* the two times, never inside one. */
+function TimeRange({ start, end }: { start: string; end: string }) {
+    return (
+        <span className="inline-flex items-center gap-2 text-caption text-muted-foreground tabular-nums">
+            <span className="whitespace-nowrap">{formatTimeOfDay(start)}</span>
+            <ArrowRight aria-hidden className="size-3 shrink-0 opacity-60" />
+            <span className="sr-only">to</span>
+            <span className="whitespace-nowrap">{formatTimeOfDay(end)}</span>
+        </span>
+    );
+}
+
+/** Collapsed-by-default breakdown for one ended session. */
+function EndedSummary({ counts }: { counts: DashboardSessionCounts }) {
+    const [open, setOpen] = useState(false);
+    const panelId = useId();
+
+    return (
+        <div className="mt-2 border-t border-dashed pt-2">
+            <button
+                type="button"
+                onClick={() => setOpen((value) => !value)}
+                aria-expanded={open}
+                aria-controls={panelId}
+                className="flex w-full items-center justify-between gap-2 rounded-md text-caption font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+                <span>{open ? 'Hide details' : 'View details'}</span>
+                <ChevronDown className={cn('size-4 transition-transform', open && 'rotate-180')} />
+            </button>
+
+            <AnimatePresence initial={false}>
+                {open && (
+                    <motion.div
+                        id={panelId}
+                        key="summary"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                        className="overflow-hidden"
+                    >
+                        <dl className="grid grid-cols-2 gap-2 pt-2 sm:grid-cols-5">
+                            {SUMMARY_STATS.map((stat) => (
+                                <div
+                                    key={stat.key}
+                                    className={cn(
+                                        'min-w-0 rounded-lg border px-2 py-2',
+                                        TONE[stat.tone].wash,
+                                        // Five tiles in a 2-col grid leaves one orphan; let it span the row.
+                                        stat.key === 'auto' && 'col-span-2 sm:col-span-1',
+                                    )}
+                                >
+                                    <dd className={cn('text-h3 leading-none font-semibold tabular-nums', TONE[stat.tone].text)}>
+                                        {counts[stat.key]}
+                                    </dd>
+                                    <dt className="mt-1 truncate text-caption text-muted-foreground">{stat.label}</dt>
+                                </div>
+                            ))}
+                        </dl>
+                        <p className="pt-2 text-caption text-muted-foreground">
+                            Auto = officers and CSG/SC admins marked present automatically; already counted in Present.
+                        </p>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}
+
+/**
  * One active (ongoing) event: an event-name header, a Day 1/Day 2/…
  * carousel (a day can hold several sessions — every window's time-in and
  * time-out is its own row, per the spec), and the schedule for whichever
@@ -52,48 +129,57 @@ export function EventSchedule({
     event,
     activeSessionId = null,
     adminLiveCounts = null,
+    adminEndedCounts = null,
+    showViewMore = false,
     studentStatus = null,
 }: {
     event: EventWithDays;
     /** The one session the dashboard summary reports as currently ongoing, if it belongs to this event. */
     activeSessionId?: number | null;
-    /** Present/total for activeSessionId — admin dashboards only. */
-    adminLiveCounts?: { present: number; totalStudents: number } | null;
+    /** Live counts (present, late, total…) for activeSessionId — admin dashboards only. */
+    adminLiveCounts?: Pick<DashboardSessionCounts, 'present' | 'late' | 'totalStudents'> | null;
+    /** Final counts per ended session id — admin dashboards only. */
+    adminEndedCounts?: Record<number, DashboardSessionCounts> | null;
     /** The viewer's own attendance status for activeSessionId — student dashboards only. */
     studentStatus?: AttendanceStatus | null;
+    /** "View more" footer link to the event's full details — CSG Admin / System Admin only. */
+    showViewMore?: boolean;
 }) {
-    const days = event.days;
+    // Calendar order, so "Day 3" never sits after "Day 6" just because it was created later.
+    const days = sortDaysByDate(event.days);
 
-    const defaultDayIndex = (() => {
-        const ongoingIndex = days.findIndex((day) => day.sessions.some((session) => session.status === SessionStatus.Ongoing));
-        if (ongoingIndex !== -1) return ongoingIndex;
-
-        const upcomingIndex = days.findIndex((day) => day.sessions.some((session) => session.status !== SessionStatus.Ended));
-        if (upcomingIndex !== -1) return upcomingIndex;
-
-        return Math.max(days.length - 1, 0);
-    })();
+    // Ongoing day → today → next upcoming → last (see pickDefaultDay).
+    const defaultDay = pickDefaultDay(days);
+    const defaultDayIndex = defaultDay ? days.indexOf(defaultDay) : 0;
 
     const [selectedDayIndex, setSelectedDayIndex] = useState(defaultDayIndex);
     const selectedDay = days[selectedDayIndex];
     const hasOngoingSession = days.some((day) => day.sessions.some((session) => session.status === SessionStatus.Ongoing));
 
     return (
-        <div className={cn('rounded-3xl border bg-card', CARD.pad)}>
+        <div className={cn('rounded-[10px] border bg-card', CARD.pad)}>
             <div className={cn('flex items-center justify-between', GAP.grid)}>
                 <Link to={`/events/${event.id}`} className="min-w-0 truncate text-h3 font-semibold hover:underline">
                     {event.name}
                 </Link>
-                {hasOngoingSession && (
-                    <Badge variant="secondary" className={cn('shrink-0 gap-2 border-transparent', TONE.emerald.chip)}>
-                        <Radio className="size-3" />
-                        Live
-                    </Badge>
+                {(hasOngoingSession || event.status === EventStatus.Ongoing) && (
+                    // Green while the event is open; red (and the broadcast icon
+                    // pulsing) the moment one of its sessions is running.
+                    <span
+                        className={cn(
+                            'inline-flex shrink-0 items-center gap-1 rounded-sm px-2 py-1 text-caption leading-none font-bold tracking-wide text-white uppercase',
+                            hasOngoingSession ? 'bg-red-600' : 'bg-emerald-600',
+                        )}
+                    >
+                        <Radio className={cn('size-3', hasOngoingSession && 'animate-pulse')} />
+                        Active
+                    </span>
                 )}
             </div>
 
             {days.length > 0 && (
-                <div className={cn('mt-4 flex overflow-x-auto pb-2', GAP.iconText)}>
+                <div className="mt-4">
+                <ScrollableTabList className="flex gap-4 border-b" activeKey={selectedDayIndex}>
                     {days.map((day, index) => {
                         const isSelected = index === selectedDayIndex;
 
@@ -101,26 +187,23 @@ export function EventSchedule({
                             <button
                                 key={day.id}
                                 type="button"
+                                role="tab"
                                 onClick={() => setSelectedDayIndex(index)}
-                                aria-pressed={isSelected}
+                                aria-selected={isSelected}
                                 className={cn(
-                                    // 40px tall, 16px of horizontal padding. These are
-                                    // secondary controls, so they take the 40px step rather
-                                    // than the 48px one a primary button gets — still a
-                                    // real tap target, still on the scale.
-                                    TAP_SM,
-                                    'shrink-0 rounded-full px-4 text-caption font-medium whitespace-nowrap transition-colors',
+                                    // Plain text; the active day gets an underline in the
+                                    // event's violet. -mb-px lets it sit on the strip's border.
+                                    'relative -mb-px shrink-0 border-b-2 px-1 pb-2 text-small font-medium whitespace-nowrap transition-colors',
                                     isSelected
-                                        ? // The selected day is the one lit element in this strip, on
-                                          // the same glow the tiles use.
-                                          'bg-violet-500 text-white shadow-md shadow-violet-500/30 dark:shadow-violet-500/20'
-                                        : 'bg-muted text-muted-foreground hover:bg-muted/70',
+                                        ? 'border-violet-500 text-violet-600 dark:text-violet-400'
+                                        : 'border-transparent text-muted-foreground hover:text-foreground',
                                 )}
                             >
                                 Day {day.dayNumber}
                             </button>
                         );
                     })}
+                </ScrollableTabList>
                 </div>
             )}
 
@@ -143,9 +226,9 @@ export function EventSchedule({
                                 // 8px top and bottom around a 32px tile puts this row at
                                 // exactly 48px — the tap-target height, and the same
                                 // height every other list row in the app now lands on.
-                                className={cn('rounded-2xl border px-4 py-2', isLive && TONE.emerald.wash)}
+                                className={cn('rounded-lg border px-4 py-2', isLive && TONE.emerald.wash)}
                             >
-                                <div className={cn('flex items-center', GAP.grid)}>
+                                <div className="flex items-center gap-3">
                                     <Tile
                                         tone={windowStyle.tone}
                                         size="sm"
@@ -155,42 +238,83 @@ export function EventSchedule({
                                         Icon={windowStyle.Icon}
                                     />
                                     <div className="min-w-0 flex-1">
-                                        <Text variant="small" className="font-medium text-foreground">
-                                            {WINDOW_TYPE_LABEL[session.windowType]} · {CHECK_TYPE_LABEL[session.checkType]}
+                                        {/* Window name on its own line; the check type is a pill and the
+                                            times a unit that never splits mid-time — so a narrow phone
+                                            wraps whole pieces onto the next line instead of leaving a
+                                            stray "PM" behind. */}
+                                        <Text variant="small" className="truncate font-medium text-foreground">
+                                            {WINDOW_TYPE_LABEL[session.windowType]}
                                         </Text>
-                                        <Text variant="caption">
-                                            {formatTimeOfDay(session.startTime)}–{formatTimeOfDay(session.endTime)}
-                                        </Text>
+                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                            <span
+                                                className={cn(
+                                                    'inline-flex items-center rounded-md px-2 py-0.5 text-caption leading-none font-medium whitespace-nowrap',
+                                                    TONE[windowStyle.tone].soft,
+                                                )}
+                                            >
+                                                {CHECK_TYPE_LABEL[session.checkType]}
+                                            </span>
+                                            <TimeRange start={session.startTime} end={session.endTime} />
+                                        </div>
                                     </div>
-                                    <span className={cn(CHIP, TONE[statusContent.tone].chip)}>
-                                        <span className={cn('size-2 rounded-full', TONE[statusContent.tone].dot)} />
+                                    <span className={cn(CHIP, 'h-7 px-3', TONE[statusContent.tone].chip)}>
+                                        <span className="relative flex size-2">
+                                            {session.status === SessionStatus.Ongoing && (
+                                                <span
+                                                    className={cn(
+                                                        'absolute inline-flex size-full animate-ping rounded-full opacity-75',
+                                                        TONE[statusContent.tone].dot,
+                                                    )}
+                                                />
+                                            )}
+                                            <span className={cn('relative inline-flex size-2 rounded-full', TONE[statusContent.tone].dot)} />
+                                        </span>
                                         {statusContent.label}
                                     </span>
                                 </div>
 
                                 {isTheActiveSession && adminLiveCounts && (
-                                    <div className="mt-2 border-t pt-2">
-                                        <div className={cn('flex items-end', GAP.iconText)}>
-                                            <span className="text-h3 leading-none font-semibold tabular-nums text-foreground">
-                                                <AnimatedCounter value={adminLiveCounts.present} />
+                                    <div className="mt-2 border-t border-dashed pt-2">
+                                        <div className="flex flex-col gap-1">
+                                            <div className={cn('flex items-end', GAP.iconText)}>
+                                                <span className="text-h3 leading-none font-semibold tabular-nums text-foreground">
+                                                    <AnimatedCounter value={adminLiveCounts.present} />
+                                                </span>
+                                                <Text variant="caption">of {adminLiveCounts.totalStudents} present so far</Text>
+                                            </div>
+                                            <span className={cn('text-caption font-medium whitespace-nowrap tabular-nums', TONE.amber.text)}>
+                                                <AnimatedCounter value={adminLiveCounts.late} /> late
                                             </span>
-                                            <Text variant="caption">of {adminLiveCounts.totalStudents} present so far</Text>
                                         </div>
-                                        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
+                                        {/* Present and Late share one bar so the amber slice reads as
+                                            "arrived, but after the grace period". */}
+                                        <div className="mt-2 flex h-2 w-full overflow-hidden rounded-full bg-muted">
                                             <motion.div
                                                 initial={{ width: 0 }}
                                                 animate={{
                                                     width: `${adminLiveCounts.totalStudents > 0 ? (adminLiveCounts.present / adminLiveCounts.totalStudents) * 100 : 0}%`,
                                                 }}
                                                 transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-                                                className={cn('h-full rounded-full', TONE.emerald.bar)}
+                                                className={cn('h-full', TONE.emerald.bar)}
+                                            />
+                                            <motion.div
+                                                initial={{ width: 0 }}
+                                                animate={{
+                                                    width: `${adminLiveCounts.totalStudents > 0 ? (adminLiveCounts.late / adminLiveCounts.totalStudents) * 100 : 0}%`,
+                                                }}
+                                                transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+                                                className={cn('h-full', TONE.amber.bar)}
                                             />
                                         </div>
                                     </div>
                                 )}
 
+                                {session.status === SessionStatus.Ended && adminEndedCounts?.[session.id] && (
+                                    <EndedSummary counts={adminEndedCounts[session.id]} />
+                                )}
+
                                 {isTheActiveSession && studentStatus && (
-                                    <div className="mt-2 flex items-center justify-between border-t pt-2">
+                                    <div className="mt-2 flex items-center justify-between border-t border-dashed pt-2">
                                         {ATTENDANCE_STATUS_CHIP[studentStatus] ? (
                                             <span className={cn(CHIP, TONE[ATTENDANCE_STATUS_CHIP[studentStatus]!.tone].chip)}>
                                                 {ATTENDANCE_STATUS_CHIP[studentStatus]!.label}
@@ -205,6 +329,18 @@ export function EventSchedule({
                     })}
                 </div>
             )}
+
+            {showViewMore && (
+                <div className="mt-4 flex justify-end border-t pt-3">
+                    <Link
+                        to={`/events/${event.id}`}
+                        className="inline-flex items-center gap-1 text-small font-medium text-violet-600 hover:underline dark:text-violet-400"
+                    >
+                        View more
+                        <ArrowRight className="size-4" />
+                    </Link>
+                </div>
+            )}
         </div>
     );
 }
@@ -212,7 +348,7 @@ export function EventSchedule({
 /** Shown instead of EventSchedule when nothing is currently open — same quiet-state visual language as the rest of the dashboard. */
 export function NoActiveEventCard() {
     return (
-        <div className={cn('flex items-center rounded-3xl border bg-card', GAP.grid, CARD.pad)}>
+        <div className={cn('flex items-center rounded-[10px] border bg-card', GAP.grid, CARD.pad)}>
             <Tile tone="neutral" variant="soft" Icon={Clock} />
             <div>
                 <Text variant="small" className="font-medium text-foreground">

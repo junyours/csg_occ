@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { CalendarX, Moon, ReceiptText, Sun, Sunrise, Wallet, type LucideIcon } from 'lucide-react';
+import { CalendarX, ReceiptText, Sun, Wallet } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -22,14 +22,9 @@ import { EmptyState, ListSkeleton } from '@/presentation/components/empty-state'
 import { Tile } from '@/presentation/components/tile';
 import { TONE, type Tone } from '@/presentation/components/tone';
 import { CHIP } from '@/presentation/components/spacing';
+import { WINDOW_STYLE } from '@/presentation/components/window-style';
 
 const ALL = 'all';
-
-const WINDOW_STYLE: Record<string, { Icon: LucideIcon; tone: Tone }> = {
-    morning: { Icon: Sunrise, tone: 'amber' },
-    afternoon: { Icon: Sun, tone: 'orange' },
-    evening: { Icon: Moon, tone: 'violet' },
-};
 
 /** Attendance status → the hue it carries everywhere else in the app. */
 const STATUS_TONE: Record<string, Tone> = {
@@ -153,7 +148,7 @@ export function AttendanceHistoryPage() {
             )}
 
             {isStudent && penaltyHistory && penaltyHistory.groups.some((group) => group.subtotal > 0) && (
-                <div className="space-y-3 rounded-2xl border border-border p-4">
+                <div className="space-y-3 rounded-[10px] border border-border p-4">
                     <Text variant="small" className="font-medium">
                         Penalties by semester
                     </Text>
@@ -234,7 +229,7 @@ export function AttendanceHistoryPage() {
                     const windowStyle = WINDOW_STYLE[entry.windowType] ?? { Icon: Sun, tone: 'neutral' as Tone };
 
                     return (
-                        <div key={entry.sessionId} className="space-y-2 rounded-2xl border border-border bg-card p-4">
+                        <div key={entry.sessionId} className="space-y-2 rounded-[10px] border border-border bg-card p-4">
                             <div className="flex items-start gap-4">
                                 {/* The window tile is filled in the status's hue,
                                     not the window's — on this screen the thing
@@ -275,7 +270,7 @@ export function AttendanceHistoryPage() {
                             </div>
 
                             {penalties.length > 0 && (
-                                <div className={cn('space-y-2 rounded-xl border p-2', TONE.red.wash)}>
+                                <div className={cn('space-y-2 rounded-lg border p-2', TONE.red.wash)}>
                                     {penalties.map((penalty) => (
                                         <PenaltyDetail key={penalty.id} penalty={penalty} />
                                     ))}
@@ -291,7 +286,7 @@ export function AttendanceHistoryPage() {
                     <Text variant="caption">Other penalties (not tied to a session above)</Text>
                     <div className="space-y-2">
                         {visibleUnmatchedPenalties.map((penalty) => (
-                            <div key={penalty.id} className="space-y-2 rounded-2xl border border-border bg-card p-4">
+                            <div key={penalty.id} className="space-y-2 rounded-[10px] border border-border bg-card p-4">
                                 <Text className="font-medium">{penalty.eventName}</Text>
                                 <Text variant="small">
                                     Day {penalty.dayNumber} — {formatDate(penalty.date)} · {WINDOW_TYPE_LABEL[penalty.windowType]} ·{' '}
@@ -349,7 +344,7 @@ function BalanceBanner({ total, label }: { total: number; label: string }) {
     const tone: Tone = owes ? 'red' : 'emerald';
 
     return (
-        <div className={cn('flex items-center gap-4 rounded-2xl border p-4', TONE[tone].wash)}>
+        <div className={cn('flex items-center gap-4 rounded-[10px] border p-4', TONE[tone].wash)}>
             <Tile tone={tone} size="lg" variant="solid" Icon={owes ? Wallet : ReceiptText} />
             <div className="min-w-0">
                 <Text variant="caption">{label}</Text>

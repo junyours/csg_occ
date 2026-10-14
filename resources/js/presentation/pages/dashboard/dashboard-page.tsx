@@ -14,8 +14,6 @@ import {
     Radio,
     ScanLine,
     Star,
-    Sun,
-    Sunrise,
     Trophy,
     Users,
     Wallet,
@@ -25,18 +23,23 @@ import {
 
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuthStore } from '@/application/auth/auth.store';
+import { useAttendanceBreakdown } from '@/application/dashboard/use-attendance-breakdown';
 import { useDashboard } from '@/application/dashboard/use-dashboard';
 import { useActiveEvents } from '@/application/events/use-active-events';
+import { useEvents } from '@/application/events/use-events';
 import type {
+    AttendanceCounts,
     DashboardActiveSession,
-    DashboardDepartmentAttendance,
     DashboardDepartmentPenalty,
+    DepartmentAttendanceBreakdown,
     DashboardSummary,
     OfficerDashboardSummary,
     StudentDashboardSummary,
 } from '@/infrastructure/dashboard/dashboard.repository.http';
-import { AttendanceStatus, CHECK_TYPE_LABEL, Role, semesterLabel, WINDOW_TYPE_LABEL } from '@/domain/enums';
+import { AttendanceStatus, CHECK_TYPE_LABEL, EventStatus, Role, semesterLabel, SessionStatus, WINDOW_TYPE_LABEL } from '@/domain/enums';
+import { sortDaysByDate } from '@/domain/default-day';
 import { cn, formatCurrency, formatDate, formatTimeOfDay } from '@/lib/utils';
 import { Heading, Text } from '@/presentation/components/typography';
 import { SemesterPicker, type SemesterSelection } from '@/presentation/components/semester-picker';
@@ -46,9 +49,11 @@ import { StreakLeaderboard } from '@/presentation/components/dashboard/streak-le
 import { EventSchedule, NoActiveEventCard } from '@/presentation/components/dashboard/event-schedule';
 import { RadialGauge, SegmentedRing } from '@/presentation/components/dashboard/gauges';
 import { Leaderboard, type LeaderboardEntry } from '@/presentation/components/dashboard/leaderboard';
+import { DepartmentLogo } from '@/presentation/components/department-logo';
 import { Glow, StatTile, Tile } from '@/presentation/components/tile';
 import { CARD, CHIP, GAP, SPACE, STACK, TAP, ROW } from '@/presentation/components/spacing';
-import { DEPARTMENT_TONES, TONE, type Tone } from '@/presentation/components/tone';
+import { departmentTone, TONE, type Tone } from '@/presentation/components/tone';
+import { WINDOW_STYLE } from '@/presentation/components/window-style';
 
 function isOfficerSummary(summary: DashboardSummary): summary is OfficerDashboardSummary {
     return summary.role === Role.Officer;
@@ -78,7 +83,8 @@ export function DashboardPage() {
 
     if (!student) return null;
 
-    const canPickSemester = [Role.SystemAdmin, Role.CsgAdmin, Role.ScAdmin].includes(student.role);
+    // System Admin only — CSG/SC admins always see the current semester.
+    const canPickSemester = student.role === Role.SystemAdmin;
 
     return (
         // Every gap on this page is a multiple of 8 (see spacing.ts): 32px
@@ -132,7 +138,13 @@ export function DashboardPage() {
 
             {data && isOfficerSummary(data) && <OfficerDashboard summary={data} />}
             {data && isStudentSummary(data) && <StudentDashboard summary={data} />}
-            {data && !isOfficerSummary(data) && !isStudentSummary(data) && <AdminDashboard summary={data} role={student.role} />}
+            {data && !isOfficerSummary(data) && !isStudentSummary(data) && (
+                <AdminDashboard
+                    summary={data}
+                    role={student.role}
+                    semester={semesterSelection === 'current' ? null : semesterSelection}
+                />
+            )}
         </div>
     );
 }
@@ -152,10 +164,10 @@ function subtitleFor(data: DashboardSummary | undefined): string {
 function DashboardSkeleton() {
     return (
         <div className={STACK.group} aria-hidden>
-            <div className="h-64 animate-pulse rounded-3xl bg-muted" />
+            <div className="h-64 animate-pulse rounded-[10px] bg-muted" />
             <div className={cn('grid grid-cols-2 sm:grid-cols-4', GAP.grid)}>
                 {[0, 1, 2, 3].map((index) => (
-                    <div key={index} className="h-20 animate-pulse rounded-2xl bg-muted" />
+                    <div key={index} className="h-20 animate-pulse rounded-lg bg-muted" />
                 ))}
             </div>
         </div>
@@ -190,15 +202,6 @@ function contributionTier(percentage: number, totalScans: number): Tier {
     if (percentage >= 25) return { label: 'Strong contributor', Icon: Star, tone: 'violet' };
     return { label: 'Getting started', Icon: Flame, tone: 'orange' };
 }
-
-// Purely a glance icon next to the window label — Morning/Afternoon/Evening
-// already carry the real meaning via WINDOW_TYPE_LABEL, this just makes it
-// scannable half a second faster.
-const WINDOW_TYPE_ICON: Record<string, LucideIcon> = {
-    morning: Sunrise,
-    afternoon: Sun,
-    evening: Moon,
-};
 
 /**
  * Minutes between now and a session's end_time, for the "N min left" chip.
@@ -272,17 +275,6 @@ function StudentDashboard({ summary }: { summary: StudentDashboardSummary }) {
                 ))}
             </motion.div>
 
-            <motion.div variants={item}>
-                <MyAttendanceStreak streak={summary.streak} />
-            </motion.div>
-
-            <motion.div variants={item} className={STACK.label}>
-                <SectionLabel Icon={Trophy} tone="orange">
-                    Streak leaderboard
-                </SectionLabel>
-                <StreakLeaderboard entries={summary.streakLeaderboard} />
-            </motion.div>
-
             {/* 8px from the label to its content, 16px between the cards inside
                 it — so the label reads as belonging to the group rather than
                 floating equidistant between two of them. */}
@@ -306,6 +298,17 @@ function StudentDashboard({ summary }: { summary: StudentDashboardSummary }) {
                         />
                     ))}
                 </div>
+            </motion.div>
+
+            <motion.div variants={item}>
+                <MyAttendanceStreak streak={summary.streak} />
+            </motion.div>
+
+            <motion.div variants={item} className={STACK.label}>
+                <SectionLabel Icon={Trophy} tone="orange">
+                    Streak leaderboard
+                </SectionLabel>
+                <StreakLeaderboard entries={summary.streakLeaderboard} />
             </motion.div>
         </motion.div>
     );
@@ -377,9 +380,19 @@ function OfficerDashboard({ summary }: { summary: OfficerDashboardSummary }) {
 // here rather than assumed from "got an AdminDashboard at all".
 const PENALTY_VIEW_ROLES: Role[] = [Role.SystemAdmin, Role.CsgAdmin];
 
-function AdminDashboard({ summary, role }: { summary: Extract<DashboardSummary, { scope: 'global' | 'department' }>; role: Role }) {
-    const { present, late, missed } = summary.overallAttendanceCounts;
+function AdminDashboard({
+    summary,
+    role,
+    semester,
+}: {
+    summary: Extract<DashboardSummary, { scope: 'global' | 'department' }>;
+    role: Role;
+    /** The picker's choice, in useEvents' vocabulary: null = current. */
+    semester: number | 'all' | null;
+}) {
     const { activeEvents, isLoading: isActiveEventsLoading } = useActiveEvents();
+    // sessionId → final counts, so each "Ended" row can look its own up.
+    const endedCountsBySession = Object.fromEntries(summary.endedSessionCounts.map((row) => [row.sessionId, row]));
 
     const penaltyEntries: LeaderboardEntry[] = summary.penaltyByEvent.map((row) => ({
         id: row.eventId,
@@ -410,51 +423,21 @@ function AdminDashboard({ summary, role }: { summary: Extract<DashboardSummary, 
                             event={event}
                             activeSessionId={summary.activeSession?.eventId === event.id ? summary.activeSession.sessionId : null}
                             adminLiveCounts={summary.activeSession?.eventId === event.id ? summary.activeSessionCounts : null}
+                            adminEndedCounts={endedCountsBySession}
+                            showViewMore={role === Role.CsgAdmin || role === Role.SystemAdmin}
                         />
                     ))}
                 </div>
             </motion.div>
 
-            <motion.div variants={item}>
-                <Card className={cn('overflow-hidden', CARD.root)}>
-                    <CardHeader className={CARD.inset}>
-                        <CardDescription>Attendance across all events</CardDescription>
-                    </CardHeader>
-                    <CardContent className={CARD.inset}>
-                        <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-center sm:justify-around">
-                            {/* 144, not 148 — a ring is a box like anything else, and
-                                an odd diameter can't be centred on the grid. */}
-                            <SegmentedRing
-                                size={SPACE.sm * 9}
-                                strokeWidth={SPACE.sm}
-                                segments={[
-                                    { value: present, className: TONE.emerald.stroke },
-                                    { value: late, className: TONE.amber.stroke },
-                                    { value: missed, className: TONE.red.stroke },
-                                ]}
-                            >
-                                <span className="text-h2 font-semibold tabular-nums text-foreground">
-                                    <AnimatedCounter value={present + late + missed} />
-                                </span>
-                                <span className="text-caption text-muted-foreground">tracked</span>
-                            </SegmentedRing>
-
-                            <div className={cn('grid w-full sm:w-auto sm:min-w-56', GAP.grid)}>
-                                <StatTile label="Present" value={present} Icon={CheckCircle2} tone="emerald" variant="solid" />
-                                <StatTile label="Late" value={late} Icon={Clock} tone="amber" />
-                                <StatTile label="Missed" value={missed} Icon={XCircle} tone="red" />
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-            </motion.div>
-
-            <motion.div variants={item} className={STACK.label}>
-                <SectionLabel Icon={Building2} tone="violet">
-                    Attendance by department
-                </SectionLabel>
-                <DepartmentComposition rows={summary.attendanceByDepartment} penaltyByDepartment={summary.penaltyByDepartment} />
-            </motion.div>
+            {/* key: a different semester means different events, so the
+                event/day choice starts over instead of pointing at an event
+                that isn't in the list any more. */}
+            <AttendanceSection
+                key={String(semester)}
+                semester={semester}
+                penaltyByDepartment={summary.penaltyByDepartment}
+            />
 
             <motion.div variants={item} className={STACK.label}>
                 <SectionLabel Icon={Wallet} tone="amber">
@@ -497,20 +480,178 @@ function SectionLabel({ Icon, tone, children }: { Icon: LucideIcon; tone: Tone; 
 }
 
 /* ---------------------------------------------------------------------- */
-/* Department composition — combines each department's share of overall  */
-/* tracked attendance with its own Present/Late/Missed split, so one card */
-/* answers both "how much of overall attendance is this department" and  */
-/* "how is that department doing". Kept on this app's existing status    */
-/* palette (emerald/amber/red) rather than a new color scheme, since     */
-/* that mapping already means Present/Late/Missed everywhere else in the */
-/* app (badges, the ring above, etc.).                                   */
+/* Attendance for one event / one day                                     */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * The admin's attendance cards. They used to total every event ever run into
+ * one number, which didn't answer any real question; now they open on the
+ * event that's active, and the admin can switch event or narrow to a day.
+ *
+ *  - Default event: the open event with a session running right now, else
+ *    any open event, else the most recent one (so a quiet dashboard shows
+ *    the last event's results rather than a blank). "All events" is still
+ *    one tap away.
+ *  - Default day: all event days.
+ *  - Every figure is a plain count: Present, Late, Missed, and Excluded.
+ */
+function AttendanceSection({
+    semester,
+    penaltyByDepartment,
+}: {
+    semester: number | 'all' | null;
+    penaltyByDepartment: DashboardDepartmentPenalty[];
+}) {
+    const { data: events = [], isLoading: isEventsLoading } = useEvents(semester);
+    const [eventChoice, setEventChoice] = useState<number | 'all' | null>(null);
+    const [dayChoice, setDayChoice] = useState<number | 'all'>('all');
+
+    const defaultEvent =
+        events.find(
+            (event) =>
+                event.status === EventStatus.Ongoing &&
+                event.days.some((day) => day.sessions.some((session) => session.status === SessionStatus.Ongoing)),
+        ) ??
+        events.find((event) => event.status === EventStatus.Ongoing) ??
+        events[0];
+
+    const eventId = eventChoice === null ? (defaultEvent?.id ?? null) : eventChoice === 'all' ? null : eventChoice;
+    const selectedEvent = events.find((event) => event.id === eventId);
+    const days = sortDaysByDate(selectedEvent?.days ?? []);
+    const selectedDay = dayChoice === 'all' ? undefined : days.find((day) => day.id === dayChoice);
+
+    // Wait for the event list before asking, so the first request is for the
+    // real default event rather than for "everything" that's thrown away.
+    const { data, isLoading, isError } = useAttendanceBreakdown(
+        { eventId, eventDayId: selectedDay?.id ?? null, semester },
+        !isEventsLoading,
+    );
+
+    const scopeLabel = `${selectedEvent?.name ?? 'All events'} · ${
+        selectedDay ? `Day ${selectedDay.dayNumber} (${formatDate(selectedDay.date)})` : 'All event days'
+    }`;
+
+    return (
+        <>
+            <motion.div variants={item} className={STACK.group}>
+                <SectionLabel Icon={CalendarDays} tone="sky">
+                    Attendance
+                </SectionLabel>
+
+                <div className={cn('flex flex-col sm:flex-row', GAP.grid)}>
+                    <Select
+                        value={eventId === null ? 'all' : String(eventId)}
+                        onValueChange={(next) => {
+                            setEventChoice(next === 'all' ? 'all' : Number(next));
+                            // A day belongs to one event, so the old choice means nothing now.
+                            setDayChoice('all');
+                        }}
+                    >
+                        <SelectTrigger className="w-full sm:w-72" aria-label="Event">
+                            <SelectValue placeholder="Event" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All events</SelectItem>
+                            {events.map((event) => (
+                                <SelectItem key={event.id} value={String(event.id)}>
+                                    {event.name}
+                                    {event.status === EventStatus.Ongoing ? ' · Active' : ''}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+
+                    <Select
+                        value={selectedDay ? String(selectedDay.id) : 'all'}
+                        onValueChange={(next) => setDayChoice(next === 'all' ? 'all' : Number(next))}
+                        disabled={eventId === null}
+                    >
+                        <SelectTrigger className="w-full sm:w-64" aria-label="Event day">
+                            <SelectValue placeholder="Day" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All event days</SelectItem>
+                            {days.map((day) => (
+                                <SelectItem key={day.id} value={String(day.id)}>
+                                    Day {day.dayNumber} · {formatDate(day.date)}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+
+                {isError && <Text variant="small">The attendance numbers didn't load. Pull down to refresh.</Text>}
+                {(isLoading || isEventsLoading) && <div aria-hidden className="h-64 animate-pulse rounded-[10px] bg-muted" />}
+
+                {data && <AttendanceOverviewCard counts={data.overall} scopeLabel={scopeLabel} />}
+            </motion.div>
+
+            <motion.div variants={item} className={STACK.label}>
+                <SectionLabel Icon={Building2} tone="violet">
+                    Attendance by department
+                </SectionLabel>
+                {data ? (
+                    <DepartmentComposition rows={data.byDepartment} penaltyByDepartment={penaltyByDepartment} />
+                ) : (
+                    <div aria-hidden className="h-40 animate-pulse rounded-[10px] bg-muted" />
+                )}
+            </motion.div>
+        </>
+    );
+}
+
+function AttendanceOverviewCard({ counts, scopeLabel }: { counts: AttendanceCounts; scopeLabel: string }) {
+    const { present, late, missed, excluded } = counts;
+
+    return (
+        <Card className={cn('overflow-hidden', CARD.root)}>
+            <CardHeader className={CARD.inset}>
+                <CardDescription className="truncate">{scopeLabel}</CardDescription>
+            </CardHeader>
+            <CardContent className={CARD.inset}>
+                <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-center sm:justify-around">
+                    {/* 144, not 148 — a ring is a box like anything else, and
+                        an odd diameter can't be centred on the grid. */}
+                    <SegmentedRing
+                        size={SPACE.sm * 9}
+                        strokeWidth={SPACE.sm}
+                        segments={[
+                            { value: present, className: TONE.emerald.stroke },
+                            { value: late, className: TONE.amber.stroke },
+                            { value: missed, className: TONE.red.stroke },
+                        ]}
+                    >
+                        <span className="text-h2 font-semibold tabular-nums text-foreground">
+                            <AnimatedCounter value={present + late + missed} />
+                        </span>
+                        <span className="text-caption text-muted-foreground">tracked</span>
+                    </SegmentedRing>
+
+                    <div className={cn('grid w-full grid-cols-2 sm:w-auto sm:min-w-80', GAP.grid)}>
+                        <StatTile label="Present" value={present} Icon={CheckCircle2} tone="emerald" variant="solid" />
+                        <StatTile label="Late" value={late} Icon={Clock} tone="amber" />
+                        <StatTile label="Missed" value={missed} Icon={XCircle} tone="red" />
+                        <StatTile label="Excluded" value={excluded} Icon={MinusCircle} tone="neutral" />
+                    </div>
+                </div>
+            </CardContent>
+        </Card>
+    );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Department composition — each department's share of the selected      */
+/* event/day's tracked attendance, with its own Present/Late/Missed/      */
+/* Excluded counts. Kept on this app's existing status palette           */
+/* (emerald/amber/red, neutral for Excluded) since that mapping already   */
+/* means the same thing everywhere else (badges, the ring above, etc.).   */
 /* ---------------------------------------------------------------------- */
 
 function DepartmentComposition({
     rows,
     penaltyByDepartment,
 }: {
-    rows: DashboardDepartmentAttendance[];
+    rows: DepartmentAttendanceBreakdown[];
     penaltyByDepartment: DashboardDepartmentPenalty[];
 }) {
     if (rows.length === 0) {
@@ -518,7 +659,7 @@ function DepartmentComposition({
             <Card className={CARD.root}>
                 <CardContent className={cn(CARD.inset, 'flex items-center', GAP.grid)}>
                     <Tile tone="neutral" variant="soft" Icon={Building2} />
-                    <Text variant="small">No attendance tracked yet.</Text>
+                    <Text variant="small">No attendance tracked for this selection yet.</Text>
                 </CardContent>
             </Card>
         );
@@ -539,12 +680,14 @@ function DepartmentComposition({
             className={cn('grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3', GAP.grid)}
         >
             {rows.map((dept, index) => {
-                const tracked = dept.present + dept.late + dept.missed;
+                const { tracked } = dept;
+                // The bar is still proportional (it shows the split at a
+                // glance); the legend below it is what became counts.
                 const presentPct = tracked > 0 ? (dept.present / tracked) * 100 : 0;
                 const latePct = tracked > 0 ? (dept.late / tracked) * 100 : 0;
-                const absentPct = tracked > 0 ? 100 - presentPct - latePct : 0;
+                const missedPct = tracked > 0 ? 100 - presentPct - latePct : 0;
                 const penalty = penaltyByDept.get(dept.departmentId);
-                const tone = DEPARTMENT_TONES[index % DEPARTMENT_TONES.length];
+                const tone = departmentTone(dept.departmentCode, index);
 
                 return (
                     <motion.div key={dept.departmentId} variants={item} className="min-w-0">
@@ -554,9 +697,13 @@ function DepartmentComposition({
                                     <div className={cn('flex min-w-0 items-center', GAP.iconText)}>
                                         {/* The one solid tile on this card: a department's code is
                                             how you identify the row, so that's what gets lit. */}
-                                        <Tile tone={tone} size="md" variant="solid">
-                                            <span className="text-xs font-bold tabular-nums">{dept.departmentCode.slice(0, 2)}</span>
-                                        </Tile>
+                                        <DepartmentLogo
+                                            code={dept.departmentCode}
+                                            logoUrl={dept.departmentLogoUrl}
+                                            tone={tone}
+                                            size="md"
+                                            variant="solid"
+                                        />
                                         <div className="min-w-0">
                                             <span className="block truncate text-small font-medium text-foreground">
                                                 {dept.departmentCode}
@@ -593,10 +740,10 @@ function DepartmentComposition({
                                             className={cn('h-full rounded-full', TONE.amber.bar)}
                                         />
                                     )}
-                                    {absentPct > 0 && (
+                                    {missedPct > 0 && (
                                         <motion.div
                                             initial={{ width: 0 }}
-                                            animate={{ width: `${absentPct}%` }}
+                                            animate={{ width: `${missedPct}%` }}
                                             transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1], delay: 0.1 }}
                                             className={cn('h-full rounded-full', TONE.red.bar)}
                                         />
@@ -604,9 +751,10 @@ function DepartmentComposition({
                                 </div>
 
                                 <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-caption text-muted-foreground">
-                                    <LegendDot tone="emerald">Present {Math.round(presentPct)}%</LegendDot>
-                                    <LegendDot tone="amber">Late {Math.round(latePct)}%</LegendDot>
-                                    <LegendDot tone="red">Missed {Math.round(absentPct)}%</LegendDot>
+                                    <LegendDot tone="emerald">Present {dept.present}</LegendDot>
+                                    <LegendDot tone="amber">Late {dept.late}</LegendDot>
+                                    <LegendDot tone="red">Missed {dept.missed}</LegendDot>
+                                    <LegendDot tone="neutral">Excluded {dept.excluded}</LegendDot>
                                     <span className="ml-auto tabular-nums">{tracked} tracked</span>
                                 </div>
 
@@ -617,8 +765,11 @@ function DepartmentComposition({
                                             TONE.red.wash,
                                         )}
                                     >
+                                        {/* Penalties stay all-events (they're a running balance, not
+                                            per-event), so say so — otherwise this figure reads as
+                                            belonging to the event picked above. */}
                                         <span className={cn('flex shrink-0 items-center text-caption text-muted-foreground', GAP.iconText)}>
-                                            <Wallet className="size-4" /> Penalties
+                                            <Wallet className="size-4" /> Penalties · all events
                                         </span>
                                         <span className="flex min-w-0 flex-wrap items-baseline justify-end gap-x-2 text-small font-semibold tabular-nums text-foreground">
                                             <span className="shrink-0">{formatCurrency(penalty.penaltyTotal)}</span>
@@ -699,7 +850,7 @@ function ScoreHero({
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            className="rounded-3xl border bg-card"
+            className="rounded-[10px] border bg-card"
         >
             <div className={cn('overflow-hidden rounded-[inherit]', CARD.pad)}>
                 <div className={cn('flex flex-col items-center text-center', GAP.grid)}>
@@ -785,7 +936,7 @@ function QuietHero({
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            className={cn('rounded-3xl border bg-card shadow-sm', CARD.pad)}
+            className={cn('rounded-[10px] border bg-card shadow-sm', CARD.pad)}
         >
             <div className={cn('flex items-center text-muted-foreground', GAP.iconText)}>
                 <Tile tone="neutral" size="sm" variant="soft" Icon={Moon} />
@@ -881,7 +1032,7 @@ function ActiveSessionCard({ session, status }: { session: DashboardActiveSessio
     }
 
     const remaining = minutesRemaining(session.endTime);
-    const WindowIcon = WINDOW_TYPE_ICON[session.windowType] ?? Clock;
+    const windowStyle = WINDOW_STYLE[session.windowType] ?? { Icon: Clock, tone: 'neutral' as Tone };
 
     return (
         <Card className={cn('border', CARD.root, TONE.emerald.wash)}>
@@ -909,7 +1060,7 @@ function ActiveSessionCard({ session, status }: { session: DashboardActiveSessio
 
                 {/* 8px top and bottom around a 32px tile = a 48px row. */}
                 <div className={cn(ROW, 'border bg-card')}>
-                    <Tile tone="sky" size="sm" variant="soft" Icon={WindowIcon} />
+                    <Tile tone={windowStyle.tone} size="sm" variant="soft" Icon={windowStyle.Icon} />
                     <div className="min-w-0 flex-1">
                         <Text variant="small" className="font-medium text-foreground">
                             {WINDOW_TYPE_LABEL[session.windowType]} · {CHECK_TYPE_LABEL[session.checkType]}

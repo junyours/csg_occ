@@ -14,6 +14,7 @@ import { useDepartments } from '@/application/departments/use-departments';
 import { useEvents } from '@/application/events/use-events';
 import { SemesterPicker, type SemesterSelection } from '@/presentation/components/semester-picker';
 import { SemesterGroupHeading } from '@/presentation/components/semester-group-heading';
+import { useDebouncedValue } from '@/application/shared/use-debounced-value';
 import { usePenalties } from '@/application/penalties/use-penalties';
 import { useReversePenalty } from '@/application/penalties/use-reverse-penalty';
 import type { PenaltyLedgerEntry } from '@/infrastructure/penalties/penalties.repository.http';
@@ -60,8 +61,12 @@ export function PenaltiesPage() {
     const [statusFilter, setStatusFilter] = useState<StatusFilter>(isStatusFilter(initialStatus) ? initialStatus : 'all');
     const [page, setPage] = useState(1);
 
+    // Live text for the input, debounced text for the query — see the same
+    // note on the students page.
+    const debouncedSearch = useDebouncedValue(search);
+
     const { data: ledgerPage, isLoading } = usePenalties({
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         departmentId: departmentFilter !== 'all' ? Number(departmentFilter) : undefined,
         eventId: eventFilter !== 'all' ? Number(eventFilter) : undefined,
         status: statusFilter,

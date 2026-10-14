@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, type ReactNode, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { isAxiosError } from 'axios';
 import { CalendarClock, CalendarDays, CalendarPlus, FileBarChart, Lock, Pencil, Radio, SearchX, Trash2, UserX } from 'lucide-react';
@@ -29,11 +29,13 @@ import { useForceDeleteEvent } from '@/application/events/use-force-delete-event
 import { useMyEventAttendance } from '@/application/events/use-my-event-attendance';
 import { useUpdateEvent } from '@/application/events/use-update-event';
 import { EVENT_STATUS_BADGE_CLASS, EVENT_STATUS_LABEL, EventStatus, Role, SessionStatus } from '@/domain/enums';
+import { pickDefaultDay, sortDaysByDate } from '@/domain/default-day';
 import { cn } from '@/lib/utils';
+import { LiveTag } from '@/presentation/components/live-tag';
 import { Heading, Text } from '@/presentation/components/typography';
 import { EmptyState, ListSkeleton, SectionHeader } from '@/presentation/components/empty-state';
+import { ScrollableTabList } from '@/presentation/components/scrollable-tab-list';
 import { Tile } from '@/presentation/components/tile';
-import { TONE } from '@/presentation/components/tone';
 import { EventDaySection } from '@/presentation/pages/events/event-day-section';
 import { RescheduleDaysDialog } from '@/presentation/pages/events/reschedule-days-dialog';
 import { StudentEventDaySection } from '@/presentation/pages/events/student-event-day-section';
@@ -77,6 +79,9 @@ export function EventDetailPage() {
     const [isDeletingEvent, setIsDeletingEvent] = useState(false);
     const [isForceDeleting, setIsForceDeleting] = useState(false);
     const [forceDeleteName, setForceDeleteName] = useState('');
+    // Which day tab is open (by day number, so a freshly added day can be
+    // selected before its id is known). null = use the smart default.
+    const [selectedDayNumber, setSelectedDayNumber] = useState<number | null>(null);
 
     const event = events?.find((candidate) => candidate.id === Number(eventId));
     const createEventDay = useCreateEventDay(Number(eventId));
@@ -92,7 +97,7 @@ export function EventDetailPage() {
     if (!student) return null;
 
     const canManage = MANAGE_ROLES.includes(student.role);
-    const sortedDays = event ? [...event.days].sort((a, b) => a.dayNumber - b.dayNumber) : [];
+    const sortedDays = event ? sortDaysByDate(event.days) : [];
     const nextDayNumber = sortedDays.length > 0 ? Math.max(...sortedDays.map((day) => day.dayNumber)) + 1 : 1;
     const isEventEnded = event?.status === EventStatus.Ended;
     // Only one session per event may be ongoing at a time (spec: don't
@@ -110,6 +115,43 @@ export function EventDetailPage() {
     const eventHasStartedSession = sortedDays.some((day) =>
         day.sessions.some((session) => session.status !== SessionStatus.Scheduled),
     );
+
+    // Default tab: a day with a session still ongoing (even if it's not today,
+    // so a session left open past midnight is seen), else today's date, else
+    // the next upcoming day, else the last one. See pickDefaultDay.
+    const pickDay = pickDefaultDay;
+
+    function renderDayTabs(days: { id: number; dayNumber: number }[], activeNumber: number | undefined, trailing?: ReactNode) {
+        return (
+            <ScrollableTabList className="flex gap-6 border-b px-4 sm:px-6" activeKey={isCreatingDay ? 'new' : (activeNumber ?? 'none')}>
+                {days.map((d) => {
+                    const isSelected = d.dayNumber === activeNumber && !isCreatingDay;
+
+                    return (
+                        <button
+                            key={d.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={isSelected}
+                            onClick={() => {
+                                setIsCreatingDay(false);
+                                setSelectedDayNumber(d.dayNumber);
+                            }}
+                            className={cn(
+                                'relative -mb-px shrink-0 border-b-2 px-1 pb-2 text-small font-medium whitespace-nowrap transition-colors',
+                                isSelected
+                                    ? 'border-violet-500 text-violet-600 dark:text-violet-400'
+                                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                            )}
+                        >
+                            Day {d.dayNumber}
+                        </button>
+                    );
+                })}
+                {trailing}
+            </ScrollableTabList>
+        );
+    }
 
     function confirmEndEvent() {
         if (!event) return;
@@ -205,6 +247,7 @@ export function EventDetailPage() {
             {
                 onSuccess: () => {
                     toast.success('Day added.');
+                    setSelectedDayNumber(Number(dayForm.dayNumber));
                     setDayForm(EMPTY_DAY_FORM);
                     setIsCreatingDay(false);
                 },
@@ -242,6 +285,9 @@ export function EventDetailPage() {
     }
 
     const hasOngoingSession = ongoingSessionId !== null;
+    const activeDay = sortedDays.find((d) => d.dayNumber === selectedDayNumber) ?? pickDay(sortedDays);
+    const studentDays = sortDaysByDate(myAttendance.data?.days ?? []);
+    const activeStudentDay = studentDays.find((d) => d.dayNumber === selectedDayNumber) ?? pickDay(studentDays);
 
     return (
         <div className="mx-auto max-w-2xl space-y-8">
@@ -252,22 +298,27 @@ export function EventDetailPage() {
               which made "is anything happening right now" a question you
               had to answer by scrolling into the day list.
             */}
-            <div className={cn('rounded-3xl border bg-card p-6', hasOngoingSession && TONE.emerald.wash)}>
+            <div className="rounded-[10px] border bg-card p-4 sm:p-6">
                 <div className="flex items-start gap-4">
                     <Tile
                         tone={hasOngoingSession ? 'emerald' : isEventEnded ? 'neutral' : 'sky'}
                         size="lg"
                         variant={hasOngoingSession ? 'solid' : 'soft'}
                         Icon={hasOngoingSession ? Radio : isEventEnded ? Lock : CalendarDays}
+                        className={hasOngoingSession ? '[&>svg]:animate-pulse' : undefined}
                     />
                     <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                             <Heading level="h2" className="min-w-0 break-words">
                                 {event.name}
                             </Heading>
-                            <Badge variant="secondary" className={EVENT_STATUS_BADGE_CLASS[event.status]}>
-                                {EVENT_STATUS_LABEL[event.status]}
-                            </Badge>
+                            {hasOngoingSession ? (
+                                <LiveTag />
+                            ) : (
+                                <Badge variant="secondary" className={cn('rounded-sm', EVENT_STATUS_BADGE_CLASS[event.status])}>
+                                    {EVENT_STATUS_LABEL[event.status]}
+                                </Badge>
+                            )}
                             {canManage && !isEventEnded && (
                                 <Button
                                     size="icon"
@@ -313,7 +364,7 @@ export function EventDetailPage() {
                         </div>
                         {event.description && <Text variant="small">{event.description}</Text>}
                         {hasOngoingSession && (
-                            <Text variant="caption" className={cn('mt-2 font-medium', TONE.emerald.text)}>
+                            <Text variant="caption" className="mt-1">
                                 A session is open for scanning right now.
                             </Text>
                         )}
@@ -322,7 +373,7 @@ export function EventDetailPage() {
                 </div>
 
                 {(REPORT_ROLES.includes(student.role) || canManage) && (
-                    <div className="mt-4 flex flex-wrap gap-2">
+                    <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
                         {REPORT_ROLES.includes(student.role) && (
                             <Button size="sm" variant="outline" className="gap-2" onClick={() => navigate(`/events/${event.id}/report`)}>
                                 <FileBarChart className="size-4" />
@@ -360,10 +411,13 @@ export function EventDetailPage() {
                 )}
             </div>
 
-            <div className="space-y-4">
-                <SectionHeader Icon={CalendarDays} tone="sky">
-                    Days
-                </SectionHeader>
+            <div className="overflow-hidden rounded-[10px] border bg-card">
+                <div className="px-4 pt-4 sm:px-6">
+                    <SectionHeader Icon={CalendarDays} tone="sky">
+                        Days
+                    </SectionHeader>
+                </div>
+                <div className="space-y-4 pb-4 sm:pb-6 [&>*:not([role=tablist])]:mx-4 sm:[&>*:not([role=tablist])]:mx-6">
 
                 {canManage ? (
                     <>
@@ -375,15 +429,41 @@ export function EventDetailPage() {
                             />
                         )}
 
-                        {sortedDays.map((day) => (
+                        {sortedDays.length > 0 &&
+                            renderDayTabs(
+                                sortedDays,
+                                activeDay?.dayNumber,
+                                !isEventEnded && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setDayForm({ date: '', dayNumber: String(nextDayNumber) });
+                                            setIsCreatingDay(true);
+                                        }}
+                                        aria-selected={isCreatingDay}
+                                        role="tab"
+                                        className={cn(
+                                            '-mb-px flex shrink-0 items-center gap-1 border-b-2 px-1 pb-2 text-small font-medium whitespace-nowrap transition-colors',
+                                            isCreatingDay
+                                                ? 'border-sky-500 text-sky-600'
+                                                : 'border-transparent text-muted-foreground hover:text-foreground',
+                                        )}
+                                    >
+                                        <CalendarPlus className="size-4" />
+                                        Add day {nextDayNumber}
+                                    </button>
+                                ),
+                            )}
+
+                        {activeDay && !isCreatingDay && (
                             <EventDaySection
-                                key={day.id}
-                                day={day}
+                                key={activeDay.id}
+                                day={activeDay}
                                 canManage={!isEventEnded}
                                 ongoingSessionId={ongoingSessionId}
                                 onDateCollision={() => setIsRescheduleOpen(true)}
                             />
-                        ))}
+                        )}
                     </>
                 ) : (
                     <>
@@ -397,15 +477,14 @@ export function EventDetailPage() {
                             />
                         )}
 
-                        {myAttendance.data?.days
-                            .slice()
-                            .sort((a, b) => a.dayNumber - b.dayNumber)
-                            .map((day) => <StudentEventDaySection key={day.id} day={day} />)}
+                        {studentDays.length > 0 && renderDayTabs(studentDays, activeStudentDay?.dayNumber)}
+                        {activeStudentDay && <StudentEventDaySection key={activeStudentDay.id} day={activeStudentDay} />}
                     </>
                 )}
 
                 {canManage &&
                     !isEventEnded &&
+                    (isCreatingDay || sortedDays.length === 0) &&
                     (isCreatingDay ? (
                         <Card>
                             <CardContent>
@@ -458,9 +537,6 @@ export function EventDetailPage() {
                             </CardContent>
                         </Card>
                     ) : (
-                        // Dashed, like "use a different account" on the login
-                        // screen: an add-slot at the end of a list, not a
-                        // button competing with the day cards above it.
                         <button
                             type="button"
                             onClick={() => {
@@ -473,6 +549,7 @@ export function EventDetailPage() {
                             Add day {nextDayNumber}
                         </button>
                     ))}
+                </div>
             </div>
 
             <Dialog open={isEditingEvent} onOpenChange={setIsEditingEvent}>

@@ -112,6 +112,7 @@ it('keeps overall attendance counts and penalty totals after the session and eve
                 'department_id' => dashboardDept('CCS')->id,
                 'department_name' => 'CCS',
                 'department_code' => 'CCS',
+                'department_logo_url' => null,
                 'present' => 1,
                 'late' => 0,
                 'missed' => 1,

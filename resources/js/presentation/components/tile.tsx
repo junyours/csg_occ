@@ -25,9 +25,9 @@ import { TONE, type Tone } from '@/presentation/components/tone';
  * *is* the row's height rather than something the row has to pad around.
  */
 const TILE_SIZE = {
-    sm: 'size-8 rounded-xl',
-    md: 'size-12 rounded-2xl',
-    lg: 'size-16 rounded-2xl',
+    sm: 'size-8 rounded-lg',
+    md: 'size-12 rounded-lg',
+    lg: 'size-16 rounded-lg',
 } as const;
 
 /**
@@ -112,7 +112,7 @@ export function StatTile({
                 // 16px padding, 16px tile-to-text. With a 48px `md` tile that
                 // puts the whole stat at 80px tall — 10 units, so two of them
                 // side by side line up with anything else on the page.
-                'flex min-w-0 items-center gap-4 rounded-2xl border bg-card p-4',
+                'flex min-w-0 items-center gap-4 rounded-lg border bg-card p-4',
                 // The tight variant drops to the 8px step throughout, landing
                 // at 48px with its 32px `sm` tile.
                 size === 'sm' && 'gap-2 p-2',
@@ -129,7 +129,7 @@ export function StatTile({
                     <AnimatedCounter value={value} format={format} />
                 </span>
                 {/* mt-1 (4px): half-step, figure to its own caption inside one text block. */}
-                <Text variant="caption" className="mt-1 block truncate leading-none">
+                <Text variant="caption" className="mt-1 block leading-tight break-words">
                     {label}
                 </Text>
             </div>

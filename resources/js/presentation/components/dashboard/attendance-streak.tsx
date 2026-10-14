@@ -4,11 +4,8 @@ import {
     CheckCircle2,
     Circle,
     Clock,
-    CloudSun,
     Flame,
     MinusCircle,
-    Moon,
-    Sun,
     Trophy,
     XCircle,
     type LucideIcon,
@@ -21,6 +18,8 @@ import { AttendanceStatus, CHECK_TYPE_LABEL, CheckType, WINDOW_TYPE_LABEL, Windo
 import { cn } from '@/lib/utils';
 import { CARD, CHIP, GAP, STACK } from '@/presentation/components/spacing';
 import { Text } from '@/presentation/components/typography';
+import { WINDOW_STYLE } from '@/presentation/components/window-style';
+import { TONE } from '@/presentation/components/tone';
 
 /**
  * The current/longest numbers this card shows come straight from the
@@ -51,16 +50,6 @@ interface StreakPip {
     windowCheckLabel: string;
     status: PipStatus;
 }
-
-/** Window → little sky icon, so a glance at a pip says "morning / afternoon /
- * evening" without reading anything. Sun for morning, a part-cloudy sun for
- * afternoon, moon for evening — each with its own tint so the badge reads
- * as a distinct time of day even at a glance. */
-const WINDOW_STYLE: Record<WindowType, { Icon: LucideIcon; badge: string }> = {
-    [WindowType.Morning]: { Icon: Sun, badge: 'bg-amber-100 text-amber-600 dark:bg-amber-900/50 dark:text-amber-300' },
-    [WindowType.Afternoon]: { Icon: CloudSun, badge: 'bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-300' },
-    [WindowType.Evening]: { Icon: Moon, badge: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/50 dark:text-indigo-300' },
-};
 
 /**
  * Only Present is a "filled" reward — everything else is a quiet outline
@@ -196,7 +185,7 @@ export function MyAttendanceStreak({ streak }: { streak: { current: number; long
                         className={cn(
                             // gap-1 (4px) is the half-step: icon stacked over its own
                             // numeral inside a 64px box. Same rule the Tile follows.
-                            'flex size-16 shrink-0 flex-col items-center justify-center gap-1 rounded-2xl',
+                            'flex size-16 shrink-0 flex-col items-center justify-center gap-1 rounded-lg',
                             current > 0
                                 ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/30'
                                 : 'bg-muted text-muted-foreground',
@@ -242,13 +231,13 @@ export function MyAttendanceStreak({ streak }: { streak: { current: number; long
                                             className="flex shrink-0 snap-start flex-col items-center gap-2"
                                         >
                                             <div className="relative">
-                                                <div className={cn('flex size-12 items-center justify-center rounded-2xl', style.chip)}>
+                                                <div className={cn('flex size-12 items-center justify-center rounded-lg', style.chip)}>
                                                     <Icon className={cn('size-5', style.icon)} />
                                                 </div>
                                                 <div
                                                     className={cn(
                                                         'absolute -top-2 -right-2 flex size-6 items-center justify-center rounded-full border-2 border-card',
-                                                        windowStyle.badge,
+                                                        TONE[windowStyle.tone].soft,
                                                     )}
                                                 >
                                                     <WindowIcon className="size-3.5" />

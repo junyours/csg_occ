@@ -1,6 +1,5 @@
 import { type ChangeEvent, type FormEvent, useRef, useState } from 'react';
 import { isAxiosError } from 'axios';
-import { Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import {
@@ -13,7 +12,6 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -27,9 +25,9 @@ import { useUpdateDepartmentLogo } from '@/application/departments/use-update-de
 import { useDeleteDepartment } from '@/application/departments/use-delete-department';
 import type { Department } from '@/domain/entities';
 import { Role } from '@/domain/enums';
-import { cn } from '@/lib/utils';
 import { Heading, Text } from '@/presentation/components/typography';
-import { DEPARTMENT_TONES, TONE } from '@/presentation/components/tone';
+import { DepartmentLogo } from '@/presentation/components/department-logo';
+import { departmentTone } from '@/presentation/components/tone';
 
 const MANAGE_ROLES: Role[] = [Role.SystemAdmin, Role.CsgAdmin];
 
@@ -223,21 +221,14 @@ export function DepartmentsPage() {
 
             <div className="space-y-4">
                 {departments?.map((department, index) => {
-                    const tone = DEPARTMENT_TONES[index % DEPARTMENT_TONES.length];
+                    const tone = departmentTone(department.code, index);
                     return (
                     <Card key={department.id} className="overflow-hidden">
                         {editingId === department.id ? (
                             <CardContent>
                                 <form onSubmit={(event) => handleEditSubmit(event, department.id)} className="space-y-4">
                                     <div className="flex items-center gap-4">
-                                        <Avatar size="lg" className="rounded-2xl">
-                                            {department.logoUrl ? (
-                                                <AvatarImage src={department.logoUrl} alt={department.code} />
-                                            ) : null}
-                                            <AvatarFallback className={cn('rounded-2xl', TONE[tone].soft)}>
-                                                <Building2 className="size-4" />
-                                            </AvatarFallback>
-                                        </Avatar>
+                                        <DepartmentLogo code={department.code} logoUrl={department.logoUrl} tone={tone} size="sm" />
                                         <Button
                                             type="button"
                                             size="sm"
@@ -281,12 +272,7 @@ export function DepartmentsPage() {
                         ) : (
                             <CardContent className="flex items-center justify-between gap-4">
                                 <div className="flex min-w-0 items-center gap-4">
-                                    <Avatar size="lg" className="rounded-2xl">
-                                        {department.logoUrl ? <AvatarImage src={department.logoUrl} alt={department.code} /> : null}
-                                        <AvatarFallback className={cn('rounded-2xl', TONE[tone].soft)}>
-                                            <Building2 className="size-4" />
-                                        </AvatarFallback>
-                                    </Avatar>
+                                    <DepartmentLogo code={department.code} logoUrl={department.logoUrl} tone={tone} size="sm" />
                                     <div className="min-w-0">
                                         <Text className="truncate font-medium">{department.name}</Text>
                                         <Text variant="small">{department.code}</Text>

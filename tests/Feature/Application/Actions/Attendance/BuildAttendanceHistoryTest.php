@@ -146,7 +146,7 @@ it('searches by attendee name and by scanning officer name', function () {
     historyRecord(historyStudent('2020400008', 'CCS', ['last_name' => 'Santos']), $session, $otherOfficer);
 
     $byStudentName = (new BuildAttendanceHistory)(['search' => 'Delacruz']);
-    $byScannerName = (new BuildAttendanceHistory)(['search' => 'Reyes']);
+    $byScannerName = (new BuildAttendanceHistory)(['search' => 'Reyes', 'search_by' => 'officer']);
 
     expect($byStudentName->total())->toBe(1)
         ->and($byStudentName->items()[0]['student_id'])->toBe($target->id)

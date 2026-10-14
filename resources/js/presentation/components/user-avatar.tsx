@@ -19,11 +19,24 @@ interface UserAvatarProps {
 }
 
 export function UserAvatar({ student, size, className, fallbackClassName, children }: UserAvatarProps) {
-    return (
+    const avatar = (
         <Avatar size={size} className={cn(className)}>
             {student.photoUrl ? <AvatarImage src={student.photoUrl} alt={`${student.firstName} ${student.lastName}`} /> : null}
             <AvatarFallback className={cn(fallbackClassName)}>{initials(student)}</AvatarFallback>
-            {children}
         </Avatar>
+    );
+
+    if (!children) return avatar;
+
+    // The Avatar circle is overflow-hidden (that's what rounds the photo), so
+    // anything placed *inside* it — a status badge on the corner — gets sliced
+    // by the circle. The overlay goes in a wrapper beside the circle instead,
+    // sitting on top of it and free to overhang the edge. The wrapper carries
+    // the same group/data-size hooks AvatarBadge's size classes key off.
+    return (
+        <span data-size={size ?? 'default'} className="group/avatar relative inline-flex shrink-0">
+            {avatar}
+            {children}
+        </span>
     );
 }

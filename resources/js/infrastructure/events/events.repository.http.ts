@@ -1,4 +1,5 @@
 import { httpClient } from '@/infrastructure/http/client';
+import { compareSessionOrder } from '@/domain/enums';
 import type { AttendanceStatus, CheckType, EventStatus, SessionStatus, WindowType } from '@/domain/enums';
 import type { EventDepartment, EventWithDays } from '@/domain/entities';
 
@@ -98,7 +99,7 @@ function toDay(day: RawDay): EventWithDays['days'][number] {
             penaltyLateAmount: Number(session.penalty_late_amount ?? 0),
             penaltyAbsentAmount: Number(session.penalty_absent_amount ?? 0),
             status: session.status as EventWithDays['days'][number]['sessions'][number]['status'],
-        })),
+        })).sort(compareSessionOrder),
     };
 }
 
@@ -207,7 +208,7 @@ function toMyEventAttendance(raw: RawMyEventAttendance): MyEventAttendance {
                 scannedAt: session.scanned_at,
                 scannedByName: session.scanned_by_name,
                 autoPresent: session.auto_present ?? false,
-            })),
+            })).sort(compareSessionOrder),
         })),
     };
 }

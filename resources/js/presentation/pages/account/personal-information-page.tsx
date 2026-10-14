@@ -45,7 +45,7 @@ interface DetailRowProps {
  */
 function DetailRow({ label, value, Icon, tone }: DetailRowProps) {
     return (
-        <div className="flex items-center gap-4 rounded-2xl border border-border bg-card p-4">
+        <div className="flex items-center gap-4 rounded-[10px] border border-border bg-card p-4">
             <Tile tone={tone} variant="soft" Icon={Icon} />
             <div className="min-w-0">
                 <Text variant="caption" className="leading-none">
@@ -125,7 +125,7 @@ export function PersonalInformationPage() {
                 </Text>
             </div>
 
-            <div className="flex items-center gap-4 rounded-3xl border bg-card p-4">
+            <div className="flex items-center gap-4 rounded-[10px] border bg-card p-4">
                 <Avatar className="size-20 shadow-lg shadow-violet-500/20 ring-4 ring-violet-500/10">
                     {student.photoUrl ? <AvatarImage src={student.photoUrl} alt={`${student.firstName} ${student.lastName}`} /> : null}
                     <AvatarFallback className="bg-violet-500/10 text-lg text-violet-600 dark:text-violet-400">

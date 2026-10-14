@@ -64,11 +64,22 @@ final class ComputeAttendanceStreaks
      * as perpetually unresolved and get skipped anyway, so this filters
      * it out up front instead of doing the same no-op work for nothing.
      *
+     * Optional scoping, used by the Leaderboard screen's filters:
+     *
+     *  - $onlyDate: walk ONLY the sessions held on that calendar date
+     *    (Y-m-d), so the streak starts from 0 at the start of that day
+     *    — the "Today" tab.
+     *  - $throughSessionId: walk the full current-semester timeline but
+     *    stop right after that session — i.e. each student's running
+     *    streak AS OF the end of that session — the "Session" tab. A
+     *    session outside the current semester's timeline yields no
+     *    sessions at all (everyone at 0).
+     *
      * @return Collection<int, array{current: int, longest: int, latest_scan_at: ?Carbon}>
      *         keyed by student_id. Every role=student student is
      *         represented, even ones with a zero streak.
      */
-    public function __invoke(?int $onlyStudentId = null): Collection
+    public function __invoke(?int $onlyStudentId = null, ?string $onlyDate = null, ?int $throughSessionId = null): Collection
     {
         // Streak-eligible = active plain students only (never staff).
         $students = Student::where('role', Role::Student)
@@ -109,15 +120,30 @@ final class ComputeAttendanceStreaks
             })
             ->values();
 
+        if ($onlyDate !== null) {
+            $sessions = $sessions
+                ->filter(fn (AttendanceSession $session) => $session->eventDay->date->format('Y-m-d') === $onlyDate)
+                ->values();
+        }
+
+        if ($throughSessionId !== null) {
+            $position = $sessions->search(fn (AttendanceSession $session) => $session->id === $throughSessionId);
+
+            $sessions = $position === false ? collect() : $sessions->slice(0, $position + 1)->values();
+        }
+
         if ($sessions->isEmpty()) {
             return $students->mapWithKeys(fn (Student $s) => [$s->id => $zero]);
         }
 
         $studentIds = $students->pluck('id');
 
+        // Only the four columns the reduction reads — this is the biggest
+        // collection in the whole computation (students x sessions rows),
+        // so not hydrating the other ten columns keeps memory down.
         $recordsBySession = AttendanceRecord::whereIn('session_id', $sessions->pluck('id'))
             ->whereIn('student_id', $studentIds)
-            ->get()
+            ->get(['session_id', 'student_id', 'status', 'scanned_at'])
             ->groupBy('session_id')
             ->map(fn (Collection $records) => $records->keyBy('student_id'));
 

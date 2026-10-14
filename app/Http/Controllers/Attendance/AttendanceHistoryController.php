@@ -32,6 +32,9 @@ class AttendanceHistoryController extends Controller
 
         if ($user->role === Role::Officer) {
             $filters['scanned_by'] = $user->id;
+            // Every row is already theirs, so "search by officer" would only
+            // ever match themselves — always search the attendee.
+            $filters['search_by'] = 'student';
         }
 
         $payload = $buildAttendanceHistory($filters)->toArray();

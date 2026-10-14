@@ -41,7 +41,7 @@ export function SettingsPage() {
 
             {canManage || canManageEvents || canManageAcademicYears || canManageDepartments || canManagePenalties || isOfficer ? (
                 // Same layout as the account page's row list: each
-                // SettingsRow already draws its own card (rounded-2xl
+                // SettingsRow already draws its own card (rounded-[10px]
                 // border), so stacking them with space-y-2 is enough.
                 // Wrapping them in a second bordered box (as this used to
                 // do) with <Separator /> lines between clipped every

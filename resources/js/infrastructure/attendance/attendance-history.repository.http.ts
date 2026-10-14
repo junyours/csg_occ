@@ -42,6 +42,9 @@ export interface AttendanceHistoryEntry {
     checkType: CheckType;
 }
 
+/** Whose name the search box matches: the attendee, or the officer who scanned them. */
+export type AttendanceHistorySearchBy = 'student' | 'officer';
+
 export type AttendanceHistoryStatusFilter = 'all' | 'present' | 'late' | 'missed' | 'excluded';
 export type AttendanceHistorySort = 'recent' | 'name' | 'course' | 'year_level' | 'section' | 'major' | 'event';
 
@@ -54,6 +57,8 @@ export interface AttendanceHistoryFilters {
     eventId?: number;
     status?: AttendanceHistoryStatusFilter;
     search?: string;
+    /** Omitted = 'student'. */
+    searchBy?: AttendanceHistorySearchBy;
     sort?: AttendanceHistorySort;
     /** null/omitted = current semester; a number = that semester; 'all' = every semester. */
     semester?: number | 'all' | null;
@@ -191,6 +196,7 @@ export const httpAttendanceHistoryRepository = {
                 event_id: filters.eventId,
                 status: filters.status,
                 search: filters.search,
+                search_by: filters.search ? filters.searchBy : undefined,
                 sort: filters.sort,
                 semester_id: typeof filters.semester === 'number' ? filters.semester : undefined,
                 scope: filters.semester === 'all' ? 'all' : undefined,

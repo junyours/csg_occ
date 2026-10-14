@@ -41,7 +41,7 @@ export function SettingsRow({ to, icon, tone, onClick, destructive, trailing, ch
     );
 
     const className = cn(
-        'flex w-full items-center gap-4 rounded-2xl border border-border bg-card p-4 text-left transition-all',
+        'flex w-full items-center gap-4 rounded-[10px] border border-border bg-card p-4 text-left transition-all',
         destructive ? 'hover:border-red-500/30 hover:bg-red-500/5' : 'hover:shadow-md active:scale-[0.995]',
     );
 

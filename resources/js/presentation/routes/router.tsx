@@ -17,6 +17,7 @@ import { DepartmentsPage } from '@/presentation/pages/departments/departments-pa
 import { EventDetailPage } from '@/presentation/pages/events/event-detail-page';
 import { ManageExclusionsPage } from '@/presentation/pages/exclusions/manage-exclusions-page';
 import { EventsPage } from '@/presentation/pages/events/events-page';
+import { LeaderboardPage } from '@/presentation/pages/leaderboard/leaderboard-page';
 import { ErrorPage } from '@/presentation/pages/errors/error-page';
 import { NotFoundPage } from '@/presentation/pages/errors/not-found-page';
 import { PasswordResetCodesPage } from '@/presentation/pages/password-reset-codes/password-reset-codes-page';
@@ -60,6 +61,7 @@ export const router = createBrowserRouter([
                             },
                             { path: '/attendance-history', element: <AttendanceHistoryAdminPage /> },
                             { path: '/departments', element: <DepartmentsPage /> },
+                            { path: '/leaderboard', element: <LeaderboardPage /> },
                             { path: '/events', element: <EventsPage /> },
                             { path: '/events/:eventId', element: <EventDetailPage /> },
                             { path: '/events/:eventId/report', element: <EventRosterReportPage /> },
